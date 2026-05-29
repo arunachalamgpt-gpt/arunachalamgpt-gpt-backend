@@ -1,0 +1,361 @@
+{
+  "info": {
+    "name": "ArunachalamGPT Backend",
+    "_postman_id": "f1a6b8c2-3d4e-4a5f-8b6c-7d8e9f0a1b2c",
+    "description": "Feature 6 — Verified Lodge Booking.\n\n**Run order for an end-to-end smoke test:**\n1. *System / Health* — confirm the service is up.\n2. *Lodges / Create lodge* — captures `{{lodge_id}}` into the collection.\n3. *Lodges / Update lodge — mark verified* — flips `verified=true` (required before bookings).\n4. *Lodges / Set daily availability* — seeds rooms for the check-in date.\n5. *Lodges / Search verified lodges with availability* — sanity check.\n6. *Bookings / Create booking* — captures `{{booking_ref}}` into the collection.\n7. *Bookings / Confirm payment* — moves status to `confirmed`.\n8. *Bookings / Cancel booking* — applies 24h refund rule.\n\nAll error responses share one envelope:\n```json\n{\n  \"error\": {\n    \"code\": \"lodge_not_found\",\n    \"message\": \"Lodge not found\",\n    \"request_id\": \"...\",\n    \"details\": {}\n  }\n}\n```",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Root banner",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": ["{{baseUrl}}"],
+              "path": [""]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DB check + pool stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/db-check",
+              "host": ["{{baseUrl}}"],
+              "path": ["db-check"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "OpenAPI JSON",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi.json",
+              "host": ["{{baseUrl}}"],
+              "path": ["openapi.json"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Lodges",
+      "item": [
+        {
+          "name": "List lodges (verified only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/lodges?verified_only=true&max_walk_minutes=15&max_price=1000&limit=50&offset=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["lodges"],
+              "query": [
+                { "key": "verified_only", "value": "true" },
+                { "key": "max_walk_minutes", "value": "15" },
+                { "key": "max_price", "value": "1000" },
+                { "key": "limit", "value": "50" },
+                { "key": "offset", "value": "0" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Search verified lodges with availability",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/lodges/search?checkin_date={{checkin_date}}&max_walk_minutes=15&min_price=300&max_price=1500&limit_primary=3&limit_backups=2",
+              "host": ["{{baseUrl}}"],
+              "path": ["lodges", "search"],
+              "query": [
+                { "key": "checkin_date", "value": "{{checkin_date}}" },
+                { "key": "max_walk_minutes", "value": "15" },
+                { "key": "min_price", "value": "300" },
+                { "key": "max_price", "value": "1500" },
+                { "key": "limit_primary", "value": "3" },
+                { "key": "limit_backups", "value": "2" }
+              ]
+            },
+            "description": "Returns `primary` (lodges with rooms available) and `backups` (full lodges suggested when the preferred one is taken — Method 3 of the design doc)."
+          },
+          "response": []
+        },
+        {
+          "name": "Create lodge",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('lodge_id', body.id);",
+                  "console.log('Saved lodge_id =', body.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Murugan Residency\",\n  \"address\": \"12, Car Street, Near East Gopuram, Tiruvannamalai\",\n  \"phone\": \"9444444444\",\n  \"walk_minutes_to_temple\": 8,\n  \"room_types\": [\"double\", \"family\", \"AC\"],\n  \"price_normal\": 800,\n  \"price_pournami\": 1200,\n  \"price_karthigai\": 1800,\n  \"facilities\": [\"AC\", \"hot_water\", \"parking\", \"TV\"],\n  \"payment_accepted\": [\"cash\", \"upi\"],\n  \"photo_urls\": [\n    \"https://supabase.example/lodges/murugan-room.jpg\",\n    \"https://supabase.example/lodges/murugan-bath.jpg\"\n  ],\n  \"upi_id\": \"murugan@ybl\",\n  \"verified\": false,\n  \"listing_fee_monthly\": 700\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/lodges",
+              "host": ["{{baseUrl}}"],
+              "path": ["lodges"]
+            },
+            "description": "`verified` is ignored on create — always `false`. Flip it via PATCH after the in-person site visit."
+          },
+          "response": []
+        },
+        {
+          "name": "Get lodge",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/lodges/{{lodge_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["lodges", "{{lodge_id}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update lodge — mark verified",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"verified\": true,\n  \"price_normal\": 850\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/lodges/{{lodge_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["lodges", "{{lodge_id}}"]
+            },
+            "description": "PATCH semantics — only include fields you want to change."
+          },
+          "response": []
+        },
+        {
+          "name": "Get availability for a date",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/lodges/{{lodge_id}}/availability?date={{checkin_date}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["lodges", "{{lodge_id}}", "availability"],
+              "query": [
+                { "key": "date", "value": "{{checkin_date}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Set daily availability (AVAIL N)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{checkin_date}}\",\n  \"rooms_available\": 5,\n  \"update_source\": \"owner_whatsapp\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/lodges/{{lodge_id}}/availability",
+              "host": ["{{baseUrl}}"],
+              "path": ["lodges", "{{lodge_id}}", "availability"]
+            },
+            "description": "Mirrors the lodge owner's daily `AVAIL 5` WhatsApp reply (Method 1 in the design doc)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Bookings",
+      "item": [
+        {
+          "name": "Create booking",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('booking_ref', body.booking_ref);",
+                  "console.log('Saved booking_ref =', body.booking_ref);"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Generate a fresh idempotency key per click (override with header if you want to test replay).",
+                  "pm.collectionVariables.set('idempotency_key', 'idem-' + Date.now());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{idempotency_key}}", "description": "Safe to retry — duplicate requests with the same key return the original booking." }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"devotee_phone\": \"9876543210\",\n  \"devotee_name\": \"Kavitha\",\n  \"lodge_id\": \"{{lodge_id}}\",\n  \"checkin_date\": \"{{checkin_date}}\",\n  \"checkin_time\": \"early_morning\",\n  \"payment_method\": \"gpay\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings"]
+            },
+            "description": "`checkin_time` ∈ `night_before | early_morning | morning | afternoon_or_later`.\n\n`payment_method` ∈ `gpay | phonepe | paytm | bhim | bank_transfer | razorpay | paypal | wise`.\n\nError codes you may see: `lodge_not_found` (404), `lodge_not_verified` (400), `no_rooms_available` (409), `validation_failed` (422)."
+          },
+          "response": []
+        },
+        {
+          "name": "List bookings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bookings?phone=9876543210&status=pending&limit=50&offset=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings"],
+              "query": [
+                { "key": "phone", "value": "9876543210" },
+                { "key": "status", "value": "pending" },
+                { "key": "limit", "value": "50" },
+                { "key": "offset", "value": "0" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get booking by reference",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{booking_ref}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "{{booking_ref}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Confirm payment (Rs.49)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_reference\": \"UPI-TXN-2026052900042\",\n  \"screenshot_url\": \"https://supabase.example/proofs/kavitha-may23.jpg\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{booking_ref}}/confirm-payment",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "{{booking_ref}}", "confirm-payment"]
+            },
+            "description": "Both fields optional. `payment_reference` is the UPI/Razorpay txn id (stored in `notes` for audit)."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel booking (devotee)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": { "mode": "raw", "raw": "" },
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{booking_ref}}/cancel?cancelled_by_lodge=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "{{booking_ref}}", "cancel"],
+              "query": [
+                { "key": "cancelled_by_lodge", "value": "false" }
+              ]
+            },
+            "description": "24-hour refund rule (computed in IST):\n- 24h+ before check-in → full Rs.49 refund\n- <24h before → no refund\n- `cancelled_by_lodge=true` → always full refund"
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel booking (lodge-initiated)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": { "mode": "raw", "raw": "" },
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{booking_ref}}/cancel?cancelled_by_lodge=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "{{booking_ref}}", "cancel"],
+              "query": [
+                { "key": "cancelled_by_lodge", "value": "true" }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080", "type": "string" },
+    { "key": "lodge_id", "value": "", "type": "string", "description": "Set automatically by 'Create lodge' test script." },
+    { "key": "booking_ref", "value": "", "type": "string", "description": "Set automatically by 'Create booking' test script." },
+    { "key": "checkin_date", "value": "2026-06-15", "type": "string", "description": "Future date used across availability + booking calls." },
+    { "key": "idempotency_key", "value": "", "type": "string", "description": "Refreshed by the 'Create booking' pre-request script on every click." }
+  ]
+}
