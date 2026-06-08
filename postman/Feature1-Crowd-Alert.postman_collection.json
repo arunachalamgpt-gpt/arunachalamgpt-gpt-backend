@@ -337,6 +337,29 @@
             "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] }
           },
           "response": []
+        },
+        {
+          "name": "Twilio inbound (form-encoded)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/x-www-form-urlencoded" },
+              { "key": "X-Twilio-Signature", "value": "<computed-by-twilio>" }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "From", "value": "whatsapp:+919876543210" },
+                { "key": "Body", "value": "Hi" },
+                { "key": "MessageSid", "value": "SMtest123" },
+                { "key": "AccountSid", "value": "ACtest" },
+                { "key": "To", "value": "whatsapp:+14155238886" }
+              ]
+            },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp/twilio", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp", "twilio"] },
+            "description": "Twilio's WhatsApp webhook target. Returns 503 if disabled, 403 on signature mismatch, 200 on success with `{accepted, to, reply_state, send}`."
+          },
+          "response": []
         }
       ]
     },

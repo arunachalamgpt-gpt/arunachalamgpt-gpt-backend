@@ -99,11 +99,10 @@ def _detect_elderly_children(text: str) -> tuple[bool, bool]:
     return has_elderly, has_children
 
 
-def _crowd_one_liner(db: Session) -> tuple[str, str]:
-    """Returns `(message, summary_line)`."""
-    snapshot = crowd_svc.current_status(db)
+def _crowd_summary_line(snapshot) -> str:
+    """Build the `Free 100 min | Rs.50 SOLD | Rs.200 5 min` summary."""
     if snapshot.freshness == "closed" or snapshot.free_wait_min is None:
-        return snapshot.message, ""
+        return ""
     parts = [f"Free {snapshot.free_wait_min} min"]
     if snapshot.rs50_sold_out:
         parts.append("Rs.50 SOLD")
@@ -113,7 +112,7 @@ def _crowd_one_liner(db: Session) -> tuple[str, str]:
         parts.append("Rs.200 SOLD")
     elif snapshot.rs200_wait_min is not None:
         parts.append(f"Rs.200 {snapshot.rs200_wait_min} min")
-    return snapshot.message, " | ".join(parts)
+    return " | ".join(parts)
 
 
 # ---------- LLM intent path ----------
@@ -150,14 +149,15 @@ def _dispatch_intent(
         )
 
     if result.intent == "ask_crowd":
-        snapshot_message, summary = _crowd_one_liner(db)
-        text = f"{snapshot_message} — {summary}" if summary else snapshot_message
+        snapshot = crowd_svc.current_status(db)
+        summary = _crowd_summary_line(snapshot)
+        text = f"{snapshot.message} — {summary}" if summary else snapshot.message
         return BotReply(
             phone=phone,
             text=text,
             language=profile.language,  # type: ignore[arg-type]
             state=profile.onboarding_state,  # type: ignore[arg-type]
-            metadata={"freshness": crowd_svc.current_status(db).freshness},
+            metadata={"freshness": snapshot.freshness},
         )
 
     if result.intent == "ask_plan":
@@ -223,9 +223,9 @@ def _dispatch_keywords(
     lower = text.lower()
 
     if any(k in lower for k in ("crowd", "queue", "line", "wait", "now")):
-        snapshot_message, summary = _crowd_one_liner(db)
         snapshot = crowd_svc.current_status(db)
-        text_out = f"{snapshot_message} — {summary}" if summary else snapshot_message
+        summary = _crowd_summary_line(snapshot)
+        text_out = f"{snapshot.message} — {summary}" if summary else snapshot.message
         return BotReply(
             phone=phone,
             text=text_out,
@@ -283,14 +283,17 @@ def handle_incoming(db: Session, msg: IncomingWhatsAppMessage) -> BotReply:
     profile = _get_or_create_profile(db, msg.phone)
     text = msg.text.strip()
 
-    # Step 2: Language selection — always keyword/number matched (cheap).
+    # Step 2: Language selection.
+    # Fast path: direct numeric match — no LLM call needed for "1".."5".
+    # LLM only fires when the user typed something else (e.g. "Tamil please").
     if profile.language is None:
-        result = intent_svc.classify(text)
-        picked: Optional[str] = None
-        if result.intent == "select_language":
-            picked = LANGUAGE_BY_INDEX.get(result.slots.get("language_code", ""))
+        picked: Optional[str] = LANGUAGE_BY_INDEX.get(text)
         if picked is None:
-            picked = LANGUAGE_BY_INDEX.get(text)
+            result = intent_svc.classify(text)
+            if result.intent == "select_language":
+                picked = LANGUAGE_BY_INDEX.get(
+                    result.slots.get("language_code", "")
+                )
         if picked is None:
             return BotReply(
                 phone=msg.phone,

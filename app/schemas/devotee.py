@@ -73,7 +73,9 @@ class IncomingWhatsAppMessage(BaseModel):
     """Body the WhatsApp bridge (Twilio/360dialog adaptor) POSTs to the bot."""
 
     phone: str = Field(pattern=PHONE_PATTERN, examples=["9876543210"])
-    text: str = Field(min_length=1)
+    # WhatsApp message bodies can be up to 4096 chars; clamp at 4000 to leave
+    # margin for downstream processing and bound abuse via huge payloads.
+    text: str = Field(min_length=1, max_length=4000)
 
     model_config = ConfigDict(
         json_schema_extra={

@@ -305,6 +305,29 @@
             "description": "Free-form English that the keyword path catches via 'how long' → none. LLM should classify as `ask_crowd` or `ask_plan`."
           },
           "response": []
+        },
+        {
+          "name": "Twilio inbound (form-encoded)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/x-www-form-urlencoded" },
+              { "key": "X-Twilio-Signature", "value": "<computed-by-twilio>", "description": "HMAC-SHA1 of webhook URL + sorted params, base64-encoded. See README → Twilio section for the formula." }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "From", "value": "whatsapp:+919876543210" },
+                { "key": "Body", "value": "Hi" },
+                { "key": "MessageSid", "value": "SMtest123" },
+                { "key": "AccountSid", "value": "ACtest" },
+                { "key": "To", "value": "whatsapp:+14155238886" }
+              ]
+            },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp/twilio", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp", "twilio"] },
+            "description": "This is the route Twilio calls. Returns 503 when `TWILIO_ENABLED=false`, 403 on signature mismatch. For local testing point Twilio's sandbox `When a message comes in` URL to your `ngrok` HTTPS endpoint + `/webhook/whatsapp/twilio`, set the same URL in `TWILIO_WEBHOOK_URL`, then have Twilio compute the signature."
+          },
+          "response": []
         }
       ]
     },

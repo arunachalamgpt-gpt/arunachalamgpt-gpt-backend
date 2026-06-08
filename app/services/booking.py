@@ -103,6 +103,9 @@ def create_booking(
 
     last_error: Optional[Exception] = None
     for attempt in range(BOOKING_REF_MAX_RETRIES):
+        # Use a SAVEPOINT so a unique-key collision only rolls back this
+        # INSERT — not the availability decrement above.
+        savepoint = db.begin_nested()
         booking = LodgeBooking(
             id=uuid.uuid4(),
             booking_ref=_generate_booking_ref(),
@@ -120,21 +123,23 @@ def create_booking(
         db.add(booking)
         try:
             db.flush()
-            logger.info(
-                "Booking created ref=%s lodge=%s date=%s",
-                booking.booking_ref,
-                booking.lodge_id,
-                booking.checkin_date,
-            )
-            return booking
         except IntegrityError as exc:
-            db.rollback()
+            savepoint.rollback()
             last_error = exc
             logger.warning(
                 "Booking ref collision (attempt %s/%s) — retrying",
                 attempt + 1,
                 BOOKING_REF_MAX_RETRIES,
             )
+            continue
+        savepoint.commit()
+        logger.info(
+            "Booking created ref=%s lodge=%s date=%s",
+            booking.booking_ref,
+            booking.lodge_id,
+            booking.checkin_date,
+        )
+        return booking
     raise ConflictError(
         "Could not allocate a unique booking reference after retries"
     ) from last_error

@@ -75,6 +75,7 @@ arunachalamgpt-gpt-backend/
     │   ├── llm.py               # Feature 1: OpenAI GPT-4o client wrapper
     │   ├── intent.py            # Feature 1: LLM intent classifier (romanized text aware)
     │   ├── translator.py        # Feature 1: reply translator into devotee's language
+    │   ├── whatsapp.py          # Feature 1: Twilio bridge (signature verify + send_text)
     │   ├── booking.py           # Feature 6: create / confirm / cancel + refund rule
     │   ├── availability.py      # Feature 6: daily updates + auto increment/decrement
     │   └── pricing.py           # Feature 6: normal/Pournami/Karthigai price selection
@@ -222,10 +223,10 @@ pytest
 ```
 
 The run enforces **100% line coverage** of `app/` (`--cov-fail-under=100`) — at
-last count **222 tests** covering models, schemas, services (parsers,
+last count **241 tests** covering models, schemas, services (parsers,
 fallback, state machine, refund rule, LLM wrapper, intent classifier,
-translator), routers, middleware, handlers, the lifespan, and reflection of
-the OpenAPI schema. An HTML coverage report is
+translator, Twilio signature verify + send), routers, middleware, handlers,
+the lifespan, and reflection of the OpenAPI schema. An HTML coverage report is
 written to `htmlcov/`. Tests use an in-memory SQLite — production `psql` is
 never touched. The model layer stays Postgres-compatible because the
 `StringArray` type-decorator in [app/models/types.py](app/models/types.py)
@@ -275,6 +276,12 @@ All settings come from environment variables (loaded from `.env`).
 | `OPENAI_API_KEY` | *(unset)* | OpenAI API key. Required when `OPENAI_ENABLED=true`. |
 | `OPENAI_MODEL` | `gpt-4o-mini` | Model name. `gpt-4o-mini` is cheaper; switch to `gpt-4o` for higher-quality translations. |
 | `OPENAI_TIMEOUT_SECONDS` | `8` | Per-request timeout. Short so a stalled call can't block a WhatsApp reply. |
+| `TWILIO_ENABLED` | `false` | Master switch for the Twilio WhatsApp bridge. Off in dev/tests. |
+| `TWILIO_ACCOUNT_SID` | *(unset)* | Twilio account SID (`AC…`). Required when enabled. |
+| `TWILIO_AUTH_TOKEN` | *(unset)* | Twilio auth token. Used for HTTP Basic auth on outbound + HMAC verification on inbound. |
+| `TWILIO_FROM_NUMBER` | *(unset)* | Sender phone in E.164 (`+14155238886` for the sandbox). |
+| `TWILIO_WEBHOOK_URL` | *(unset)* | The exact public URL Twilio is configured to call. Must match what's set in Twilio Console for signature verification to succeed. |
+| `TWILIO_TIMEOUT_SECONDS` | `8` | Per-request timeout for outbound Twilio API calls. |
 
 ## API map
 
@@ -407,6 +414,46 @@ This means dev + the test suite work without an API key, and prod can flip
 romanized text (*"crowd enna"*, *"ticket epdi"*, *"kuthukal enna ippo"*),
 code-mix, and misspellings.
 
+### Twilio WhatsApp bridge
+
+Inbound + outbound wiring lives in [app/services/whatsapp.py](app/services/whatsapp.py)
+and the route is `POST /webhook/whatsapp/twilio`.
+
+**Inbound:**
+1. Twilio POSTs form-encoded (`From=whatsapp:+919876543210`, `Body=…`,
+   `MessageSid=…`, …) with an `X-Twilio-Signature` header.
+2. We HMAC-SHA1 the configured `TWILIO_WEBHOOK_URL` + sorted form params with
+   `TWILIO_AUTH_TOKEN`, base64-encode, and `hmac.compare_digest` against the
+   header. Mismatch → 403.
+3. Strip `whatsapp:+` from `From` → normalised phone.
+4. Run the same `devotee_flow.handle_incoming` pipeline as the internal
+   route (LLM → keyword → translator).
+5. POST the reply back to Twilio's Messages API.
+
+**Outbound:** `send_text(phone, body)` POSTs to
+`https://api.twilio.com/2010-04-01/Accounts/{SID}/Messages.json` with HTTP
+Basic auth. Returns a `SendResult` with the provider message id or error —
+never raises, so a failed send doesn't break the inbound flow.
+
+**Disabled mode:** when `TWILIO_ENABLED=false` (default), the route returns
+**503**, `send_text` returns `SendResult(sent=False, error="twilio_disabled")`,
+and no network call is made.
+
+#### Local testing with the Twilio sandbox
+
+1. Sign up for Twilio and join the WhatsApp sandbox
+   (`https://www.twilio.com/console/sms/whatsapp/sandbox`).
+2. Expose your local server: `ngrok http 8080` — copy the HTTPS forwarding
+   URL.
+3. In the Twilio sandbox config, set **WHEN A MESSAGE COMES IN** to
+   `https://<your-ngrok>.ngrok.app/webhook/whatsapp/twilio`.
+4. Put the **same** URL in your `.env` as `TWILIO_WEBHOOK_URL` (signature
+   verification compares against this exact string).
+5. Set `TWILIO_ENABLED=true`, plus `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+   and `TWILIO_FROM_NUMBER=+14155238886` (the sandbox number).
+6. Restart, then text *"join &lt;keyword&gt;"* to the sandbox number from your
+   own WhatsApp — Twilio relays it through `/webhook/whatsapp/twilio`.
+
 ## Robustness guarantees
 
 - **Anti-oversell.** `decrement`/`set_availability` take a `SELECT ... FOR UPDATE`
@@ -497,14 +544,13 @@ stable; clients should switch on it rather than the human-readable
 ## Things deliberately left for later
 
 **Feature 1 — Crowd Alert:**
-- WhatsApp bridge (Twilio / 360dialog) — wraps incoming text and forwards
-  outgoing replies; the REST surface is the contract it integrates with
 - APScheduler jobs for the D-2 (7 am), D-1 (7 pm), morning-of (6 am) push
   templates from Steps 5–7 of the design doc
-- Broadcast send-out — `ADMIN broadcast` parses and returns a payload; the
-  bridge owns the actual message dispatch
+- Broadcast send-out — `ADMIN broadcast` parses and returns a payload; need
+  to wire it to `whatsapp.send_text` over every devotee in the target language
 - Volunteer crowdsourcing rollup — periodic job aggregating `crowd_history`
   hourly to inflate prediction sample size beyond just post-darshan reports
+- 360dialog provider (if Twilio's per-message price becomes a concern at scale)
 
 **Feature 6 — Verified Lodge Booking:**
 - Razorpay webhook handler for auto-payment-verification (Phase 2/3 of design)
