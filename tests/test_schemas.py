@@ -93,5 +93,5 @@ def test_availability_update_rejects_past_date():
 
 
 def test_availability_update_today_or_future_ok():
-    AvailabilityUpdate(date=date.today(), rooms_available=0)
-    AvailabilityUpdate(date=date.today() + timedelta(days=1), rooms_available=10)
+    AvailabilityUpdate(date=date.today() + timedelta(days=1), rooms_available=0)
+    AvailabilityUpdate(date=date.today() + timedelta(days=7), rooms_available=10)

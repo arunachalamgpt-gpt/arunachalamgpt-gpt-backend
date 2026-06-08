@@ -65,6 +65,15 @@ def future_date():
 
 
 @pytest.fixture
+def seed_temple_config(db_session):
+    from app.services import temple_config
+
+    temple_config.ensure_defaults(db_session)
+    db_session.commit()
+    return temple_config
+
+
+@pytest.fixture
 def make_lodge(db_session):
     def _factory(*, verified: bool = True, **overrides) -> Lodge:
         defaults = {

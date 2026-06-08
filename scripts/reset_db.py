@@ -45,7 +45,9 @@ def main() -> int:
         conn.exec_driver_sql("DROP TABLE IF EXISTS alembic_version")
 
     print("Running alembic upgrade head...")
-    result = subprocess.run(["alembic", "upgrade", "head"], check=False)
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"], check=False
+    )
     if result.returncode != 0:
         print("alembic upgrade failed; see output above.")
         return result.returncode

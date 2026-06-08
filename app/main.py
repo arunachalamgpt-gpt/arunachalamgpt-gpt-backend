@@ -27,7 +27,11 @@ from app.errors import DatabaseError
 from app.logging_config import setup_logging
 from app.middleware import MaxBodySizeMiddleware, RequestContextMiddleware
 from app.routers import bookings as bookings_router
+from app.routers import crowd as crowd_router
+from app.routers import devotees as devotees_router
 from app.routers import lodges as lodges_router
+from app.routers import temple_config as temple_config_router
+from app.routers import webhook as webhook_router
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -51,6 +55,10 @@ All errors return a uniform JSON envelope:
 """
 
 TAGS_METADATA = [
+    {"name": "crowd", "description": "Volunteer reports, live status, predictions, post-darshan history."},
+    {"name": "devotees", "description": "Devotee profile + planning recommendation."},
+    {"name": "webhook", "description": "WhatsApp bridge — drives the 10-step user journey."},
+    {"name": "admin", "description": "temple_config CRUD and `ADMIN ...` command dispatch."},
     {"name": "lodges", "description": "Lodge directory, verified listings, daily availability."},
     {"name": "bookings", "description": "Devotee bookings: create, confirm payment, cancel."},
     {"name": "system", "description": "Health, DB diagnostics, root."},
@@ -93,6 +101,10 @@ app.add_middleware(
 )
 exception_handlers.register(app)
 
+app.include_router(crowd_router.router)
+app.include_router(devotees_router.router)
+app.include_router(webhook_router.router)
+app.include_router(temple_config_router.router)
 app.include_router(lodges_router.router)
 app.include_router(bookings_router.router)
 

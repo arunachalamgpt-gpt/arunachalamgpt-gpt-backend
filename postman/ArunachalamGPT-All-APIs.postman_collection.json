@@ -1,0 +1,580 @@
+{
+  "info": {
+    "name": "ArunachalamGPT — All APIs",
+    "_postman_id": "9b3e7f2a-4d61-4a8e-8f3a-1c7d9e8b5a2f",
+    "description": "Every endpoint from both features:\n\n- **Feature 1 — Crowd Alert & Visit Planning** (crowd, devotees, webhook, admin)\n- **Feature 6 — Verified Lodge Booking** (lodges, bookings)\n- **System** (root, health, DB check, OpenAPI JSON)\n\nAll error responses share the uniform envelope:\n```json\n{\n  \"error\": {\n    \"code\": \"lodge_not_found\",\n    \"message\": \"Lodge not found\",\n    \"request_id\": \"...\",\n    \"details\": {}\n  }\n}\n```\n\n**End-to-end smoke test (in folder order):**\n\n1. *System / Health* — confirm the service is up.\n2. *Crowd / Submit raw volunteer message* — seeds `crowd_status`.\n3. *Crowd / Get current* — should return `freshness: live`.\n4. *Webhook / First contact (Hi)* — language menu returned.\n5. *Webhook / Pick language (1=Tamil)* — saved on profile.\n6. *Webhook / Register visit date + elderly* — saves date and family flags.\n7. *Webhook / Ask for plan* — returns Step 3 recommendation.\n8. *Admin / Run command — ADMIN config rs50_sold_out true* — flips sold-out flag.\n9. *Lodges / Create lodge* — captures `{{lodge_id}}`.\n10. *Lodges / Update lodge — mark verified* — flips `verified=true`.\n11. *Lodges / Set daily availability* — seeds rooms for `{{checkin_date}}`.\n12. *Bookings / Create booking* — generates fresh `Idempotency-Key`, captures `{{booking_ref}}`.\n13. *Bookings / Confirm payment* — status → `confirmed`.\n14. *Bookings / Cancel booking* — applies 24h refund rule.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Root banner",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/", "host": ["{{baseUrl}}"], "path": [""] }
+          },
+          "response": []
+        },
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] }
+          },
+          "response": []
+        },
+        {
+          "name": "DB check + pool stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/db-check", "host": ["{{baseUrl}}"], "path": ["db-check"] }
+          },
+          "response": []
+        },
+        {
+          "name": "OpenAPI JSON",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/openapi.json", "host": ["{{baseUrl}}"], "path": ["openapi.json"] }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Crowd",
+      "item": [
+        {
+          "name": "Submit raw volunteer message",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reporter_phone\": \"9444444444\",\n  \"text\": \"F:180 T50:40 T200:15\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/crowd/reports", "host": ["{{baseUrl}}"], "path": ["crowd", "reports"] },
+            "description": "Body is the verbatim WhatsApp text. Server parses `F:<min>` (free), `T50:<min|SOLD>`, `T200:<min|SOLD>`."
+          },
+          "response": []
+        },
+        {
+          "name": "Submit structured volunteer report",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reporter_phone\": \"9444444444\",\n  \"free_wait_min\": 60,\n  \"rs50_wait_min\": 10,\n  \"rs200_wait_min\": 5,\n  \"rs50_sold_out\": false,\n  \"rs200_sold_out\": false,\n  \"source\": \"volunteer\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/crowd/reports/structured", "host": ["{{baseUrl}}"], "path": ["crowd", "reports", "structured"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Get current crowd (fallback applied)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/crowd/current", "host": ["{{baseUrl}}"], "path": ["crowd", "current"] },
+            "description": "Returns `freshness`: `live` (<2h), `stale` (2-6h), `prediction_only` (>6h), or `closed` (outside opening hours)."
+          },
+          "response": []
+        },
+        {
+          "name": "Predict wait from history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/crowd/predict?visit_date={{visit_date}}&hour_of_day=8&is_pournami=false&is_festival=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["crowd", "predict"],
+              "query": [
+                { "key": "visit_date", "value": "{{visit_date}}" },
+                { "key": "hour_of_day", "value": "8" },
+                { "key": "is_pournami", "value": "false" },
+                { "key": "is_festival", "value": "false" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Post-darshan history record",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"visit_date\": \"{{visit_date}}\",\n  \"hour_of_day\": 9,\n  \"is_pournami\": false,\n  \"is_festival\": false,\n  \"free_wait_min\": 75,\n  \"rs50_wait_min\": 15,\n  \"rs200_wait_min\": 5,\n  \"source\": \"post_visit\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/crowd/history", "host": ["{{baseUrl}}"], "path": ["crowd", "history"] }
+          },
+          "response": []
+        },
+        {
+          "name": "List history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/crowd/history?limit=20&offset=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["crowd", "history"],
+              "query": [
+                { "key": "limit", "value": "20" },
+                { "key": "offset", "value": "0" }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Devotees",
+      "item": [
+        {
+          "name": "Upsert profile",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"name\": \"Kavitha\",\n  \"language\": \"english\",\n  \"has_elderly\": true,\n  \"has_children\": true,\n  \"planned_visit_date\": \"{{visit_date}}\",\n  \"home_city\": \"Chennai\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/devotees", "host": ["{{baseUrl}}"], "path": ["devotees"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Get profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/devotees/{{devotee_phone}}", "host": ["{{baseUrl}}"], "path": ["devotees", "{{devotee_phone}}"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Patch profile (toggle children)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"has_children\": false\n}" },
+            "url": { "raw": "{{baseUrl}}/devotees/{{devotee_phone}}", "host": ["{{baseUrl}}"], "path": ["devotees", "{{devotee_phone}}"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Get planning recommendation",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/devotees/{{devotee_phone}}/plan", "host": ["{{baseUrl}}"], "path": ["devotees", "{{devotee_phone}}", "plan"] },
+            "description": "Step 3 advice — arrival time + line + packing checklist based on the profile's `has_elderly` and `has_children` flags."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Webhook (WhatsApp)",
+      "item": [
+        {
+          "name": "First contact (Hi)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"Hi\"\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Pick language (1 = Tamil)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"1\"\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Register visit date + elderly",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"Visiting with my elderly mother on {{visit_date}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Ask for plan",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"plan?\"\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Live crowd query",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"crowd now?\"\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Change language",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"change to english\"\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "List all config",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/admin/config", "host": ["{{baseUrl}}"], "path": ["admin", "config"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Get one config (rs200_ticket_price)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/admin/config/rs200_ticket_price", "host": ["{{baseUrl}}"], "path": ["admin", "config", "rs200_ticket_price"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Upsert config — temple_open_time",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"value\": \"05:30\",\n  \"description\": \"Temple opening time (24h).\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/admin/config/temple_open_time", "host": ["{{baseUrl}}"], "path": ["admin", "config", "temple_open_time"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Run command — ADMIN config rs50_sold_out true",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sender_phone\": \"9444444444\",\n  \"text\": \"ADMIN config rs50_sold_out true\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/admin/commands", "host": ["{{baseUrl}}"], "path": ["admin", "commands"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Run command — ADMIN crowd F:60 T50:15 T200:5",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sender_phone\": \"9444444444\",\n  \"text\": \"ADMIN crowd F:60 T50:15 T200:5\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/admin/commands", "host": ["{{baseUrl}}"], "path": ["admin", "commands"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Run command — ADMIN broadcast Tamil",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sender_phone\": \"9444444444\",\n  \"text\": \"ADMIN broadcast Tamil Crowd is low now!\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/admin/commands", "host": ["{{baseUrl}}"], "path": ["admin", "commands"] }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Lodges",
+      "item": [
+        {
+          "name": "List lodges (verified only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/lodges?verified_only=true&max_walk_minutes=15&max_price=1000&limit=50&offset=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["lodges"],
+              "query": [
+                { "key": "verified_only", "value": "true" },
+                { "key": "max_walk_minutes", "value": "15" },
+                { "key": "max_price", "value": "1000" },
+                { "key": "limit", "value": "50" },
+                { "key": "offset", "value": "0" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Search verified lodges with availability",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/lodges/search?checkin_date={{checkin_date}}&max_walk_minutes=15&min_price=300&max_price=1500&limit_primary=3&limit_backups=2",
+              "host": ["{{baseUrl}}"],
+              "path": ["lodges", "search"],
+              "query": [
+                { "key": "checkin_date", "value": "{{checkin_date}}" },
+                { "key": "max_walk_minutes", "value": "15" },
+                { "key": "min_price", "value": "300" },
+                { "key": "max_price", "value": "1500" },
+                { "key": "limit_primary", "value": "3" },
+                { "key": "limit_backups", "value": "2" }
+              ]
+            },
+            "description": "Primary list = lodges with rooms free. Backup list = full lodges suggested as alternatives (design doc Method 3)."
+          },
+          "response": []
+        },
+        {
+          "name": "Create lodge",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('lodge_id', body.id);",
+                  "console.log('Saved lodge_id =', body.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Murugan Residency\",\n  \"address\": \"12, Car Street, Near East Gopuram, Tiruvannamalai\",\n  \"phone\": \"9444444444\",\n  \"walk_minutes_to_temple\": 8,\n  \"room_types\": [\"double\", \"family\", \"AC\"],\n  \"price_normal\": 800,\n  \"price_pournami\": 1200,\n  \"price_karthigai\": 1800,\n  \"facilities\": [\"AC\", \"hot_water\", \"parking\", \"TV\"],\n  \"payment_accepted\": [\"cash\", \"upi\"],\n  \"photo_urls\": [\n    \"https://supabase.example/lodges/murugan-room.jpg\",\n    \"https://supabase.example/lodges/murugan-bath.jpg\"\n  ],\n  \"upi_id\": \"murugan@ybl\",\n  \"verified\": false,\n  \"listing_fee_monthly\": 700\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/lodges", "host": ["{{baseUrl}}"], "path": ["lodges"] },
+            "description": "`verified` is ignored on create — always set to `false`. Flip it via PATCH after the in-person site visit."
+          },
+          "response": []
+        },
+        {
+          "name": "Get lodge",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/lodges/{{lodge_id}}", "host": ["{{baseUrl}}"], "path": ["lodges", "{{lodge_id}}"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Update lodge — mark verified",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"verified\": true,\n  \"price_normal\": 850\n}" },
+            "url": { "raw": "{{baseUrl}}/lodges/{{lodge_id}}", "host": ["{{baseUrl}}"], "path": ["lodges", "{{lodge_id}}"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Get availability for a date",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/lodges/{{lodge_id}}/availability?date={{checkin_date}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["lodges", "{{lodge_id}}", "availability"],
+              "query": [{ "key": "date", "value": "{{checkin_date}}" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Set daily availability (AVAIL N)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{checkin_date}}\",\n  \"rooms_available\": 5,\n  \"update_source\": \"owner_whatsapp\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/lodges/{{lodge_id}}/availability", "host": ["{{baseUrl}}"], "path": ["lodges", "{{lodge_id}}", "availability"] },
+            "description": "Mirrors the lodge owner's daily `AVAIL 5` WhatsApp reply."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Bookings",
+      "item": [
+        {
+          "name": "Create booking",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('idempotency_key', 'idem-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('booking_ref', body.booking_ref);",
+                  "console.log('Saved booking_ref =', body.booking_ref);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{idempotency_key}}", "description": "Duplicate POSTs with the same key return the original booking instead of double-holding." }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"devotee_phone\": \"{{devotee_phone}}\",\n  \"devotee_name\": \"Kavitha\",\n  \"lodge_id\": \"{{lodge_id}}\",\n  \"checkin_date\": \"{{checkin_date}}\",\n  \"checkin_time\": \"early_morning\",\n  \"payment_method\": \"gpay\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/bookings", "host": ["{{baseUrl}}"], "path": ["bookings"] },
+            "description": "`checkin_time` ∈ `night_before | early_morning | morning | afternoon_or_later`.\n\n`payment_method` ∈ `gpay | phonepe | paytm | bhim | bank_transfer | razorpay | paypal | wise`."
+          },
+          "response": []
+        },
+        {
+          "name": "List bookings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bookings?phone={{devotee_phone}}&status=pending&limit=50&offset=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings"],
+              "query": [
+                { "key": "phone", "value": "{{devotee_phone}}" },
+                { "key": "status", "value": "pending" },
+                { "key": "limit", "value": "50" },
+                { "key": "offset", "value": "0" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get booking by reference",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/bookings/{{booking_ref}}", "host": ["{{baseUrl}}"], "path": ["bookings", "{{booking_ref}}"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Confirm payment (Rs.49)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_reference\": \"UPI-TXN-2026052900042\",\n  \"screenshot_url\": \"https://supabase.example/proofs/kavitha-may23.jpg\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/bookings/{{booking_ref}}/confirm-payment", "host": ["{{baseUrl}}"], "path": ["bookings", "{{booking_ref}}", "confirm-payment"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel booking (devotee)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": { "mode": "raw", "raw": "" },
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{booking_ref}}/cancel?cancelled_by_lodge=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "{{booking_ref}}", "cancel"],
+              "query": [{ "key": "cancelled_by_lodge", "value": "false" }]
+            },
+            "description": "24-hour refund rule (IST): full refund if 24h+ away, none if under 24h, `cancelled_by_lodge=true` always full refund."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel booking (lodge-initiated)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": { "mode": "raw", "raw": "" },
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{booking_ref}}/cancel?cancelled_by_lodge=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "{{booking_ref}}", "cancel"],
+              "query": [{ "key": "cancelled_by_lodge", "value": "true" }]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080", "type": "string", "description": "Service root URL." },
+    { "key": "devotee_phone", "value": "9876543210", "type": "string", "description": "WhatsApp number used across devotee + webhook + booking flows." },
+    { "key": "visit_date", "value": "2026-06-15", "type": "string", "description": "Planned visit date for Feature 1 flows." },
+    { "key": "checkin_date", "value": "2026-06-15", "type": "string", "description": "Lodge check-in date for Feature 6 flows." },
+    { "key": "lodge_id", "value": "", "type": "string", "description": "Auto-set by 'Lodges / Create lodge' test script." },
+    { "key": "booking_ref", "value": "", "type": "string", "description": "Auto-set by 'Bookings / Create booking' test script." },
+    { "key": "idempotency_key", "value": "", "type": "string", "description": "Refreshed per click by the booking pre-request script." }
+  ]
+}
