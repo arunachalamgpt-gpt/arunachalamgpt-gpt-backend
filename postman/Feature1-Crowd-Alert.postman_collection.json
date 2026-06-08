@@ -1,0 +1,395 @@
+{
+  "info": {
+    "name": "ArunachalamGPT — Feature 1 (Crowd Alert)",
+    "_postman_id": "c2a8f5d4-1e6b-4f0a-9c2d-5b8e6f3a2d1c",
+    "description": "Crowd reporting, live status with fallback, predictions, devotee profile, planning advice, admin commands, and the WhatsApp webhook driving the 10-step user journey.\n\n**End-to-end smoke test:**\n1. *Admin / Upsert config — temple_open_time* (seed defaults — optional)\n2. *Crowd / Submit raw volunteer message* — captures live status\n3. *Crowd / Get current* — should return `freshness: live`\n4. *Webhook / First contact (Hi)* — language menu\n5. *Webhook / Pick language (1=Tamil)* — saved\n6. *Webhook / Register visit date* — saves planned date + flags\n7. *Webhook / Ask for plan* — returns Step 3 recommendation\n8. *Admin / Run command — ADMIN config rs50_sold_out true* — flips sold-out\n9. *Crowd / Get current* — shows rs50_sold_out: true",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Crowd",
+      "item": [
+        {
+          "name": "Submit raw volunteer message",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reporter_phone\": \"9444444444\",\n  \"text\": \"F:180 T50:40 T200:15\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/crowd/reports",
+              "host": ["{{baseUrl}}"],
+              "path": ["crowd", "reports"]
+            },
+            "description": "Body is the verbatim WhatsApp text. Server parses `F:N` (free), `T50:N`, `T200:N`. `SOLD` flips the sold-out flag and leaves the wait column NULL."
+          },
+          "response": []
+        },
+        {
+          "name": "Submit structured volunteer report",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reporter_phone\": \"9444444444\",\n  \"free_wait_min\": 60,\n  \"rs50_wait_min\": 10,\n  \"rs200_wait_min\": 5,\n  \"rs50_sold_out\": false,\n  \"rs200_sold_out\": false,\n  \"source\": \"volunteer\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/crowd/reports/structured",
+              "host": ["{{baseUrl}}"],
+              "path": ["crowd", "reports", "structured"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get current crowd (fallback applied)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/crowd/current",
+              "host": ["{{baseUrl}}"],
+              "path": ["crowd", "current"]
+            },
+            "description": "Returns `freshness`: `live` (<2h), `stale` (2-6h), `prediction_only` (>6h), or `closed` (outside opening hours)."
+          },
+          "response": []
+        },
+        {
+          "name": "Predict wait from history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/crowd/predict?visit_date={{visit_date}}&hour_of_day=8&is_pournami=false&is_festival=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["crowd", "predict"],
+              "query": [
+                { "key": "visit_date", "value": "{{visit_date}}" },
+                { "key": "hour_of_day", "value": "8" },
+                { "key": "is_pournami", "value": "false" },
+                { "key": "is_festival", "value": "false" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Post-darshan history record",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"visit_date\": \"{{visit_date}}\",\n  \"hour_of_day\": 9,\n  \"is_pournami\": false,\n  \"is_festival\": false,\n  \"free_wait_min\": 75,\n  \"rs50_wait_min\": 15,\n  \"rs200_wait_min\": 5,\n  \"source\": \"post_visit\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/crowd/history",
+              "host": ["{{baseUrl}}"],
+              "path": ["crowd", "history"]
+            },
+            "description": "Step 10 of the user journey — devotee's observed wait, fed into future predictions."
+          },
+          "response": []
+        },
+        {
+          "name": "List history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/crowd/history?limit=10&offset=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["crowd", "history"],
+              "query": [
+                { "key": "limit", "value": "10" },
+                { "key": "offset", "value": "0" }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Devotees",
+      "item": [
+        {
+          "name": "Upsert profile",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"name\": \"Kavitha\",\n  \"language\": \"english\",\n  \"has_elderly\": true,\n  \"has_children\": true,\n  \"planned_visit_date\": \"{{visit_date}}\",\n  \"home_city\": \"Chennai\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/devotees",
+              "host": ["{{baseUrl}}"],
+              "path": ["devotees"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/devotees/{{devotee_phone}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["devotees", "{{devotee_phone}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Patch profile (toggle children)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"has_children\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/devotees/{{devotee_phone}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["devotees", "{{devotee_phone}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get planning recommendation",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/devotees/{{devotee_phone}}/plan",
+              "host": ["{{baseUrl}}"],
+              "path": ["devotees", "{{devotee_phone}}", "plan"]
+            },
+            "description": "Step 3 — arrival time + line + packing checklist tuned to the profile's `has_elderly` and `has_children` flags."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Webhook (WhatsApp)",
+      "item": [
+        {
+          "name": "First contact (Hi)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"Hi\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook/whatsapp",
+              "host": ["{{baseUrl}}"],
+              "path": ["webhook", "whatsapp"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Pick language (1 = Tamil)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"1\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook/whatsapp",
+              "host": ["{{baseUrl}}"],
+              "path": ["webhook", "whatsapp"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Register visit date + elderly",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"Visiting with my elderly mother on {{visit_date}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook/whatsapp",
+              "host": ["{{baseUrl}}"],
+              "path": ["webhook", "whatsapp"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Ask for plan",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"plan?\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook/whatsapp",
+              "host": ["{{baseUrl}}"],
+              "path": ["webhook", "whatsapp"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Live crowd query",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"crowd now?\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook/whatsapp",
+              "host": ["{{baseUrl}}"],
+              "path": ["webhook", "whatsapp"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Change language",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"change to english\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook/whatsapp",
+              "host": ["{{baseUrl}}"],
+              "path": ["webhook", "whatsapp"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "List all config",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/config",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "config"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get one config (rs200_ticket_price)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/config/rs200_ticket_price",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "config", "rs200_ticket_price"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Upsert config — temple_open_time",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"value\": \"05:30\",\n  \"description\": \"Temple opening time (24h).\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/config/temple_open_time",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "config", "temple_open_time"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Run command — ADMIN config rs50_sold_out true",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sender_phone\": \"9444444444\",\n  \"text\": \"ADMIN config rs50_sold_out true\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/commands",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "commands"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Run command — ADMIN crowd F:60 T50:15 T200:5",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sender_phone\": \"9444444444\",\n  \"text\": \"ADMIN crowd F:60 T50:15 T200:5\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/commands",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "commands"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Run command — ADMIN broadcast Tamil",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sender_phone\": \"9444444444\",\n  \"text\": \"ADMIN broadcast Tamil Crowd is low now!\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/commands",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "commands"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080", "type": "string" },
+    { "key": "devotee_phone", "value": "9876543210", "type": "string" },
+    { "key": "visit_date", "value": "2026-06-15", "type": "string" }
+  ]
+}

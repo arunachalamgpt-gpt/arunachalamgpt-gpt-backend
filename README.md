@@ -1,9 +1,16 @@
 # ArunachalamGPT Backend
 
-FastAPI service powering **Feature 6 — Verified Lodge Booking** for the
-ArunachalamGPT WhatsApp assistant. Devotees travelling to Tiruvannamalai
-book personally-verified lodges near Arunachaleswarar Temple, pay a Rs.49
-booking fee, and pay the room rent at the lodge on arrival.
+FastAPI service powering the ArunachalamGPT WhatsApp assistant for devotees
+travelling to Tiruvannamalai.
+
+- **Feature 1 — Crowd Alert and Visit Planning.** Live East-gate crowd
+  status from hourly volunteer reports, historical-prediction fallback,
+  multi-language devotee profiles, the 10-step user journey driven by the
+  WhatsApp webhook, planning advice for families with elderly or children,
+  admin commands for sold-out tickets and config tweaks.
+- **Feature 6 — Verified Lodge Booking.** Devotees book personally-verified
+  lodges near Arunachaleswarar Temple, pay a Rs.49 booking fee, and pay the
+  room rent at the lodge on arrival.
 
 ## Stack
 
@@ -21,34 +28,60 @@ booking fee, and pay the room rent at the lodge on arrival.
 ```
 arunachalamgpt-gpt-backend/
 ├── run.py                       # uvicorn launcher, reads APP_PORT from env
-├── requirements.txt
+├── requirements.txt             # runtime deps (pinned)
+├── requirements-dev.txt         # pytest, pytest-cov, httpx, pip-audit
+├── pytest.ini                   # --cov-fail-under=100
+├── .coveragerc                  # coverage scope = app/
+├── Dockerfile                   # python:3.12-slim, non-root, /health probe
 ├── .env / .env.example
-├── .gitignore
+├── .gitignore / .dockerignore
 ├── alembic.ini                  # Alembic config; URL pulled from app.config
 ├── alembic/
 │   ├── env.py                   # bridges Alembic to SQLModel.metadata
-│   ├── script.py.mako           # revision template
+│   ├── script.py.mako           # revision template (auto-imports sqlmodel + StringArray)
 │   └── versions/                # generated migration files
 ├── scripts/
 │   └── reset_db.py              # dev-only: drop everything + alembic upgrade head
+├── postman/
+│   ├── Feature1-Crowd-Alert.postman_collection.json
+│   └── ArunachalamGPT-Backend.postman_collection.json
+├── tests/                       # 100% coverage suite (184 tests)
 └── app/
     ├── main.py                  # FastAPI composition, lifespan, routers, /docs
     ├── config.py                # env-driven settings
     ├── database.py              # engine + pool + session + table init
     ├── errors.py                # domain exception hierarchy
     ├── exception_handlers.py    # global handlers, uniform JSON envelope
-    ├── middleware.py            # X-Request-ID + access logging
+    ├── middleware.py            # X-Request-ID + access logging + body size cap
     ├── logging_config.py        # stdout logger with request-id context
     ├── models/                  # SQLModel ORM tables
-    │   └── lodge.py
+    │   ├── types.py             # StringArray — ARRAY(Text) on Postgres, JSON on SQLite
+    │   ├── crowd.py             # Feature 1: CrowdStatus, CrowdHistory
+    │   ├── devotee.py           # Feature 1: DevoteeProfile
+    │   ├── temple_config.py     # Feature 1: TempleConfig key/value store
+    │   └── lodge.py             # Feature 6: Lodge, LodgeBooking, LodgeAvailability
     ├── schemas/                 # Pydantic request/response schemas
+    │   ├── crowd.py
+    │   ├── devotee.py
+    │   ├── temple_config.py
     │   └── lodge.py
     ├── services/                # Business logic
-    │   ├── booking.py           # create / confirm / cancel + refund rule
-    │   └── availability.py      # daily updates + auto increment/decrement
+    │   ├── crowd.py             # Feature 1: volunteer parser + fallback rules
+    │   ├── prediction.py        # Feature 1: avg waits from crowd_history
+    │   ├── planning.py          # Feature 1: Step 3 advice (elderly/children)
+    │   ├── admin_commands.py    # Feature 1: ADMIN config|crowd|broadcast parser
+    │   ├── devotee_flow.py      # Feature 1: 10-step state machine
+    │   ├── temple_config.py     # Feature 1: key/value CRUD + seed defaults
+    │   ├── booking.py           # Feature 6: create / confirm / cancel + refund rule
+    │   ├── availability.py      # Feature 6: daily updates + auto increment/decrement
+    │   └── pricing.py           # Feature 6: normal/Pournami/Karthigai price selection
     └── routers/                 # HTTP endpoints
-        ├── lodges.py
-        └── bookings.py
+        ├── crowd.py             # Feature 1
+        ├── devotees.py          # Feature 1
+        ├── webhook.py           # Feature 1: POST /webhook/whatsapp
+        ├── temple_config.py     # Feature 1: /admin/config + /admin/commands
+        ├── lodges.py            # Feature 6
+        └── bookings.py          # Feature 6
 ```
 
 ## Database migrations
@@ -119,25 +152,47 @@ APP_RELOAD=true
 - Liveness → http://localhost:8080/health
 - DB + pool stats → http://localhost:8080/db-check
 
-## Postman collection
+## Postman collections
 
-A ready-to-import collection lives at
-[postman/ArunachalamGPT-Backend.postman_collection.json](postman/ArunachalamGPT-Backend.postman_collection.json).
+Three ready-to-import collections live under `postman/`:
 
-It includes every endpoint with sample payloads, a `{{baseUrl}}` variable
-(defaults to `http://localhost:8080`), and test scripts that chain requests
-end-to-end:
+### All APIs (recommended)
+[postman/ArunachalamGPT-All-APIs.postman_collection.json](postman/ArunachalamGPT-All-APIs.postman_collection.json)
 
-1. **Create lodge** stores the new `id` as `{{lodge_id}}`.
-2. **Update lodge — mark verified** flips `verified=true`.
-3. **Set daily availability** seeds rooms for `{{checkin_date}}` (default
-   `2026-06-15`; edit the variable to test other days).
-4. **Create booking** generates a fresh `Idempotency-Key` per click and stores
-   `booking_ref` as `{{booking_ref}}` — used by the confirm-payment and
-   cancel requests.
+Every endpoint in one collection — 39 requests across 7 folders:
+**System · Crowd · Devotees · Webhook (WhatsApp) · Admin · Lodges · Bookings**.
+End-to-end smoke test: `Health → Crowd report → Current → Webhook (Hi → 1 →
+register date → plan) → Admin sold-out → Lodge create → Lodge verify → Set
+availability → Booking create → Confirm payment → Cancel`.
 
-Import via *File → Import → Upload* in Postman, pick the JSON, then click
-through the requests in folder order for a working smoke test.
+### Feature 1 — Crowd Alert (subset)
+[postman/Feature1-Crowd-Alert.postman_collection.json](postman/Feature1-Crowd-Alert.postman_collection.json)
+
+Folders: **Crowd · Devotees · Webhook (WhatsApp) · Admin**. End-to-end flow:
+1. *Crowd / Submit raw volunteer message* — `F:180 T50:40 T200:15`
+2. *Crowd / Get current* — should return `freshness: live`
+3. *Webhook / First contact (Hi)* — language menu
+4. *Webhook / Pick language (1=Tamil)* — saved on profile
+5. *Webhook / Register visit date + elderly* — saves planned date and flags
+6. *Webhook / Ask for plan* — returns Step 3 recommendation
+7. *Admin / Run command — ADMIN config rs50_sold_out true* — flips sold-out flag
+8. *Crowd / Get current* — confirms `rs50_sold_out: true` propagates
+
+### Feature 6 — Verified Lodge Booking (subset)
+[postman/ArunachalamGPT-Backend.postman_collection.json](postman/ArunachalamGPT-Backend.postman_collection.json)
+
+Folders: **System · Lodges · Bookings**. End-to-end flow:
+1. *Lodges / Create lodge* — captures `{{lodge_id}}`
+2. *Lodges / Update lodge — mark verified* — flips `verified=true`
+3. *Lodges / Set daily availability* — seeds rooms for `{{checkin_date}}`
+4. *Bookings / Create booking* — generates a fresh `Idempotency-Key` per click,
+   captures `{{booking_ref}}`
+5. *Bookings / Confirm payment* — moves status to `confirmed`
+6. *Bookings / Cancel booking* — applies the 24h refund rule
+
+Both collections use a `{{baseUrl}}` variable (default `http://localhost:8080`)
+and chain captured IDs via test scripts. Import via *File → Import → Upload*
+in Postman, then click through the requests in folder order.
 
 ## Security audit
 
@@ -163,12 +218,14 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The run enforces **100% line coverage** of `app/` (`--cov-fail-under=100`) and
-prints a missing-lines report; an HTML report is written to `htmlcov/`. Tests
-use an in-memory SQLite — production `psql` is never touched. The model layer
-stays Postgres-compatible because the `StringArray` type-decorator in
-[app/models/types.py](app/models/types.py) transparently switches to JSON on
-SQLite.
+The run enforces **100% line coverage** of `app/` (`--cov-fail-under=100`) — at
+last count **184 tests** covering models, schemas, services (parsers,
+fallback, state machine, refund rule), routers, middleware, handlers, the
+lifespan, and reflection of the OpenAPI schema. An HTML coverage report is
+written to `htmlcov/`. Tests use an in-memory SQLite — production `psql` is
+never touched. The model layer stays Postgres-compatible because the
+`StringArray` type-decorator in [app/models/types.py](app/models/types.py)
+transparently switches to JSON on SQLite.
 
 ## Docker
 
@@ -213,6 +270,30 @@ All settings come from environment variables (loaded from `.env`).
 
 ## API map
 
+### Crowd (`/crowd`) — Feature 1
+- `POST /crowd/reports` — volunteer raw WhatsApp text `F:180 T50:40 T200:15`
+- `POST /crowd/reports/structured` — same payload, pre-parsed
+- `GET /crowd/current` — live status with fallback (`live` / `stale` / `prediction_only` / `closed`)
+- `GET /crowd/predict?visit_date=...&hour_of_day=...&is_pournami=...&is_festival=...`
+- `POST /crowd/history` — post-darshan crowdsourced observation (Step 10)
+- `GET /crowd/history` — paginated history
+
+### Devotees (`/devotees`) — Feature 1
+- `POST /devotees` — upsert by phone (language, family details, planned date)
+- `GET /devotees/{phone}` — profile
+- `PATCH /devotees/{phone}` — partial update
+- `GET /devotees/{phone}/plan` — Step 3 recommendation (arrival time + line + packing checklist)
+
+### Webhook (`/webhook`) — Feature 1
+- `POST /webhook/whatsapp` — bridge dispatch for the 10-step journey
+  (language pick → visit registration → live crowd → planning advice → language change)
+
+### Admin (`/admin`) — Feature 1
+- `GET /admin/config` — list every `temple_config` key
+- `GET /admin/config/{key}` — single value
+- `PUT /admin/config/{key}` — upsert
+- `POST /admin/commands` — run raw `ADMIN config|crowd|broadcast ...` text
+
 ### Lodges (`/lodges`)
 - `GET /lodges` — directory list with `verified_only`, `max_walk_minutes`, `max_price` filters
 - `GET /lodges/search?checkin_date=...` — verified lodges with availability for a date, plus **backup** lodges when primary is full (Method 3 of the design)
@@ -233,6 +314,63 @@ All settings come from environment variables (loaded from `.env`).
 - `GET /` — banner
 - `GET /health` — liveness
 - `GET /db-check` — DB round-trip + live pool counters
+
+## Feature 1 — user journey & fallback
+
+**The 10-step journey driven by `POST /webhook/whatsapp`**
+
+| # | Step | Trigger | Action |
+| --- | --- | --- | --- |
+| 1 | First contact | any text from unknown phone | Profile shell created, language menu returned |
+| 2 | Language pick | reply with `1`–`5` | Saved on profile; state → `language_selected` |
+| 3 | Planning query | keywords *plan / advice / when* | Returns arrival time + line + checklist (see `services/planning.py`) |
+| 4 | Visit registration | `YYYY-MM-DD` or `DD/MM/YYYY` in text | Saves `planned_visit_date`; auto-detects elderly/children keywords |
+| 5 | D-2 reminder | scheduler (out of scope) | Sends crowd prediction + ticket prices + packing |
+| 6 | D-1 reminder | scheduler (out of scope) | Sends weather + checklist + medical-point info |
+| 7 | Morning alert | scheduler (out of scope) | Sends live crowd from `/crowd/current` |
+| 8 | At bus stand | keywords *crowd / queue / wait* | Returns `/crowd/current` summary in one line |
+| 9 | At East gate | same | Same flow — devotee gets current line lengths |
+| 10 | After darshan | `POST /crowd/history` from bot | Wait time stored for future predictions |
+
+Steps 5–7 are scheduler jobs the WhatsApp bridge will own — the data they
+need is exactly what `/crowd/current` and `/crowd/predict` return now.
+
+**Volunteer message format** (`POST /crowd/reports`)
+
+```
+F:180 T50:40 T200:15        ← typical hourly report
+F:200 T50:SOLD T200:15      ← Rs.50 sold out
+F:180 T50:40 T200:SOLD      ← Rs.200 sold out
+```
+
+`F` = Free line, `T50` = Rs.50, `T200` = Rs.200. Each value is non-negative
+integer minutes **or** the literal `SOLD`, which flips the corresponding
+sold-out flag and stores NULL in the wait column. Tokens may appear in any
+order; missing tokens are recorded as NULL.
+
+**Fallback rules** (`GET /crowd/current`, mirrors design doc Section 9)
+
+| Age of latest report | `freshness` |
+| --- | --- |
+| < 2 h | `live` |
+| 2 – 6 h | `stale` |
+| > 6 h | `prediction_only` |
+| Before opening / after closing | `closed` |
+
+Opening hours come from `temple_open_time` and `temple_close_time` in
+`temple_config` and can be changed at runtime via `PUT /admin/config/{key}`.
+
+**Admin commands** (`POST /admin/commands`)
+
+```
+ADMIN config rs50_sold_out true              ← upsert temple_config
+ADMIN config ticket_sale_start_time 09:00
+ADMIN crowd F:60 T50:15 T200:5               ← manual report (source=admin)
+ADMIN broadcast Tamil Crowd is low now!      ← returns parsed payload
+```
+
+Unknown commands return `action: "unknown"` (HTTP 200) so the bridge can
+reply with a help message rather than crash.
 
 ## Robustness guarantees
 
@@ -306,22 +444,44 @@ stable; clients should switch on it rather than the human-readable
 
 | Code | HTTP | Source |
 | --- | --- | --- |
-| `lodge_not_found` | 404 | Lodge id does not exist |
-| `booking_not_found` | 404 | `TVM-LODGE-XXXX` reference unknown |
-| `availability_not_found` | 404 | No availability record for that lodge/date |
-| `lodge_not_verified` | 400 | Attempt to book an unverified lodge |
-| `no_rooms_available` | 409 | Availability count is zero |
-| `invalid_booking_state` | 409 | e.g. confirming a cancelled booking |
+| `lodge_not_found` | 404 | Lodge id does not exist (Feature 6) |
+| `booking_not_found` | 404 | `TVM-LODGE-XXXXXX` reference unknown (Feature 6) |
+| `availability_not_found` | 404 | No availability record for that lodge/date (Feature 6) |
+| `devotee_not_found` | 404 | Devotee profile not found (Feature 1) |
+| `config_not_found` | 404 | `temple_config` key not seeded (Feature 1) |
+| `lodge_not_verified` | 400 | Attempt to book an unverified lodge (Feature 6) |
+| `validation_failed` | 400 | Volunteer message parse error (Feature 1) or schema validation |
+| `no_rooms_available` | 409 | Availability count is zero (Feature 6) |
+| `invalid_booking_state` | 409 | e.g. confirming a cancelled booking (Feature 6) |
 | `integrity_violation` | 409 | DB unique/FK constraint violated |
+| `payload_too_large` | 413 | Request body exceeded `MAX_REQUEST_BODY_BYTES` |
 | `validation_failed` | 422 | Pydantic request validation failed |
 | `database_error` | 503 | DB unreachable / query failed |
 | `internal_error` | 500 | Unhandled exception (logged with stack trace) |
 
 ## Things deliberately left for later
 
-- WhatsApp bot bridge (parsing `AVAIL`, `PAID`, `CANCEL` messages → these endpoints)
+**Feature 1 — Crowd Alert:**
+- WhatsApp bridge (Twilio / 360dialog) — wraps incoming text and forwards
+  outgoing replies; the REST surface is the contract it integrates with
+- OpenAI GPT-4o translation for replies in the user's chosen language
+  (`BotReply.language` already carries the target code)
+- APScheduler jobs for the D-2 (7 am), D-1 (7 pm), morning-of (6 am) push
+  templates from Steps 5–7 of the design doc
+- Broadcast send-out — `ADMIN broadcast` parses and returns a payload; the
+  bridge owns the actual message dispatch
+- Volunteer crowdsourcing rollup — periodic job aggregating `crowd_history`
+  hourly to inflate prediction sample size beyond just post-darshan reports
+
+**Feature 6 — Verified Lodge Booking:**
 - Razorpay webhook handler for auto-payment-verification (Phase 2/3 of design)
-- Authentication (anyone can hit endpoints today — needs API key or JWT before launch)
-- Pournami / Karthigai date detection — `POURNAMI_DAYS_OF_MONTH` is empty; wire to a lunar-calendar lookup so `price_pournami` actually triggers
-- Photo upload to Supabase Storage — `photo_urls` is a plain text array right now
-- Alembic migrations — currently using `create_all` for dev convenience
+- Pournami / Karthigai date detection — the sets in `services/pricing.py` are
+  empty; wire to a lunar-calendar lookup so `price_pournami` / `price_karthigai`
+  actually trigger
+- Photo upload to Supabase Storage — `photo_urls` is a plain text array
+
+**Cross-cutting:**
+- Authentication — every endpoint is open today; needs an API key, JWT, or
+  Cloudflare Access in front before going live
+- Rate limiting (`slowapi`) once the WhatsApp bot is firing
+- Structured JSON logs for a log aggregator — current format is human-readable
