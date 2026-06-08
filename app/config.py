@@ -41,3 +41,11 @@ CORS_ORIGINS = [
 MAX_REQUEST_BODY_BYTES = int(os.getenv("MAX_REQUEST_BODY_BYTES", str(1 * 1024 * 1024)))
 
 LOCAL_TZ_OFFSET_MINUTES = int(os.getenv("LOCAL_TZ_OFFSET_MINUTES", "330"))
+
+# OpenAI GPT-4o — intent classification + reply translation.
+# When OPENAI_ENABLED is false (default), the bot falls back to keyword
+# matching and English-only replies, so dev/tests don't need an API key.
+OPENAI_ENABLED = os.getenv("OPENAI_ENABLED", "false").lower() == "true"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "8"))

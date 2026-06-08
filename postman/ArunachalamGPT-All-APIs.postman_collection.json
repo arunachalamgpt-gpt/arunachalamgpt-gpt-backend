@@ -2,7 +2,7 @@
   "info": {
     "name": "ArunachalamGPT — All APIs",
     "_postman_id": "9b3e7f2a-4d61-4a8e-8f3a-1c7d9e8b5a2f",
-    "description": "Every endpoint from both features:\n\n- **Feature 1 — Crowd Alert & Visit Planning** (crowd, devotees, webhook, admin)\n- **Feature 6 — Verified Lodge Booking** (lodges, bookings)\n- **System** (root, health, DB check, OpenAPI JSON)\n\nAll error responses share the uniform envelope:\n```json\n{\n  \"error\": {\n    \"code\": \"lodge_not_found\",\n    \"message\": \"Lodge not found\",\n    \"request_id\": \"...\",\n    \"details\": {}\n  }\n}\n```\n\n**End-to-end smoke test (in folder order):**\n\n1. *System / Health* — confirm the service is up.\n2. *Crowd / Submit raw volunteer message* — seeds `crowd_status`.\n3. *Crowd / Get current* — should return `freshness: live`.\n4. *Webhook / First contact (Hi)* — language menu returned.\n5. *Webhook / Pick language (1=Tamil)* — saved on profile.\n6. *Webhook / Register visit date + elderly* — saves date and family flags.\n7. *Webhook / Ask for plan* — returns Step 3 recommendation.\n8. *Admin / Run command — ADMIN config rs50_sold_out true* — flips sold-out flag.\n9. *Lodges / Create lodge* — captures `{{lodge_id}}`.\n10. *Lodges / Update lodge — mark verified* — flips `verified=true`.\n11. *Lodges / Set daily availability* — seeds rooms for `{{checkin_date}}`.\n12. *Bookings / Create booking* — generates fresh `Idempotency-Key`, captures `{{booking_ref}}`.\n13. *Bookings / Confirm payment* — status → `confirmed`.\n14. *Bookings / Cancel booking* — applies 24h refund rule.",
+    "description": "Every endpoint from both features:\n\n- **Feature 1 — Crowd Alert & Visit Planning** (crowd, devotees, webhook, admin)\n- **Feature 6 — Verified Lodge Booking** (lodges, bookings)\n- **System** (root, health, DB check, OpenAPI JSON)\n\nAll error responses share the uniform envelope:\n```json\n{\n  \"error\": {\n    \"code\": \"lodge_not_found\",\n    \"message\": \"Lodge not found\",\n    \"request_id\": \"...\",\n    \"details\": {}\n  }\n}\n```\n\n## OpenAI GPT-4o behaviour on `POST /webhook/whatsapp`\n\nDispatch order per turn:\n1. **LLM intent classifier** (fires only when `OPENAI_ENABLED=true`) — understands romanized Indic text and code-mix.\n2. **Keyword matcher** — runs when LLM is disabled OR returns `unknown`.\n3. **Translator** — outgoing text rendered in devotee's saved language. English is pass-through.\n\nWithout OpenAI configured the bot still works — the requests in the *LLM …* sub-set of the Webhook folder will fall through to the keyword path and reply in English.\n\n**End-to-end smoke test (in folder order):**\n\n1. *System / Health* — confirm the service is up.\n2. *Crowd / Submit raw volunteer message* — seeds `crowd_status`.\n3. *Crowd / Get current* — should return `freshness: live`.\n4. *Webhook / First contact (Hi)* — language menu returned.\n5. *Webhook / Pick language (1=Tamil)* — saved on profile.\n6. *Webhook / Register visit date + elderly* — saves date and family flags.\n7. *Webhook / Ask for plan* — returns Step 3 recommendation.\n8. *Webhook / LLM — romanized Tamil crowd query* — exercises GPT-4o when `OPENAI_ENABLED=true`.\n9. *Admin / Run command — ADMIN config rs50_sold_out true* — flips sold-out flag.\n10. *Lodges / Create lodge* — captures `{{lodge_id}}`.\n11. *Lodges / Update lodge — mark verified* — flips `verified=true`.\n12. *Lodges / Set daily availability* — seeds rooms for `{{checkin_date}}`.\n13. *Bookings / Create booking* — generates fresh `Idempotency-Key`, captures `{{booking_ref}}`.\n14. *Bookings / Confirm payment* — status → `confirmed`.\n15. *Bookings / Cancel booking* — applies 24h refund rule.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -248,6 +248,61 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"change to english\"\n}" },
             "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] }
+          },
+          "response": []
+        },
+        {
+          "name": "LLM — romanized Tamil crowd query",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"crowd enna ippo?\"\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] },
+            "description": "Requires OPENAI_ENABLED=true. With LLM off this falls through to the keyword path and matches `crowd`."
+          },
+          "response": []
+        },
+        {
+          "name": "LLM — romanized Tamil planning query",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"epdi varuvadhu best time?\"\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] },
+            "description": "LLM should classify as `ask_plan`. Keyword fallback matches on `best time`."
+          },
+          "response": []
+        },
+        {
+          "name": "LLM — romanized Hindi language switch",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"hindi me bolo\"\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] },
+            "description": "LLM picks `change_language` with target=hindi. Keyword path would NOT match this — needs `change to hindi`."
+          },
+          "response": []
+        },
+        {
+          "name": "LLM — code-mix visit registration",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"amma ku visit on 15/06/2026\"\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] },
+            "description": "LLM extracts visit_date + has_elderly from 'amma' (mother). Keyword fallback would also match the DD/MM/YYYY date but miss 'amma'."
+          },
+          "response": []
+        },
+        {
+          "name": "LLM — free-form crowd question",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"how long will I have to stand if I come tomorrow at 8 am\"\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] },
+            "description": "Free-form English that the keyword path catches via 'how long' → none. LLM should classify as `ask_crowd` or `ask_plan`."
           },
           "response": []
         }
