@@ -49,3 +49,13 @@ OPENAI_ENABLED = os.getenv("OPENAI_ENABLED", "false").lower() == "true"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "8"))
+
+# Twilio WhatsApp bridge. When TWILIO_ENABLED is false (default), the
+# /webhook/whatsapp/twilio route rejects with 503 and outbound sends are
+# silently skipped — so dev/tests don't need credentials.
+TWILIO_ENABLED = os.getenv("TWILIO_ENABLED", "false").lower() == "true"
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
+TWILIO_WEBHOOK_URL = os.getenv("TWILIO_WEBHOOK_URL", "")
+TWILIO_TIMEOUT_SECONDS = float(os.getenv("TWILIO_TIMEOUT_SECONDS", "8"))

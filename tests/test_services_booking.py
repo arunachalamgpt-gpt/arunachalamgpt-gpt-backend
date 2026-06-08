@@ -90,6 +90,50 @@ def test_create_booking_ref_conflict_retries_and_fails(
         booking_svc.create_booking(db_session, _payload(lodge.id, future_date))
 
 
+def test_ref_conflict_does_not_leak_availability(
+    db_session, make_lodge, future_date, monkeypatch
+):
+    """Retry on ref collision must preserve the availability decrement.
+
+    Without savepoints, the rollback on collision would also undo the
+    decrement; the next retry would create a booking without re-decrementing
+    → oversell. With savepoints, the decrement survives and a successful
+    retry leaves exactly one room held.
+    """
+    from app.services import availability as availability_svc
+
+    lodge = make_lodge()
+    _seed_rooms(db_session, lodge, future_date, rooms=2)
+
+    # First two calls return colliding refs; the third one succeeds.
+    refs = iter(["TVM-LODGE-DUPE01", "TVM-LODGE-DUPE01", "TVM-LODGE-UNIQUE"])
+    monkeypatch.setattr(booking_svc, "_generate_booking_ref", lambda: next(refs))
+
+    # Pre-seed an existing booking with the colliding ref so the first INSERT
+    # in our test will fail with IntegrityError on the unique constraint.
+    booking_svc.create_booking(
+        db_session, _payload(lodge.id, future_date, devotee_phone="9876500001")
+    )
+    db_session.commit()
+    # rooms should now be 1 (started at 2, one decremented)
+    avail = availability_svc.get_availability(db_session, lodge.id, future_date)
+    assert avail.rooms_available == 1
+
+    # Second call: first attempt collides (DUPE01 already taken), retry uses UNIQUE
+    refs = iter(["TVM-LODGE-DUPE01", "TVM-LODGE-UNIQUE"])
+    monkeypatch.setattr(booking_svc, "_generate_booking_ref", lambda: next(refs))
+    booking_svc.create_booking(
+        db_session, _payload(lodge.id, future_date, devotee_phone="9876500002")
+    )
+    db_session.commit()
+
+    avail = availability_svc.get_availability(db_session, lodge.id, future_date)
+    # Started at 1, second booking should have decremented to 0
+    assert avail.rooms_available == 0, (
+        "Decrement leaked across retry — savepoints not protecting availability"
+    )
+
+
 def test_confirm_payment_happy_path(db_session, make_lodge, future_date):
     lodge = make_lodge()
     _seed_rooms(db_session, lodge, future_date)

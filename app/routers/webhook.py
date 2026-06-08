@@ -1,20 +1,25 @@
-"""WhatsApp webhook stub.
+"""WhatsApp webhook routes.
 
-Accepts a normalised `{phone, text}` body from the WhatsApp bridge
-(Twilio / 360dialog adaptor — not implemented here). Runs the devotee-flow
-state machine and returns a `BotReply` the bridge should send back to the
-user. Persisting state changes (language selected, visit date saved) happens
-inside `devotee_flow.handle_incoming` and is committed before the response.
+Two endpoints:
+
+- `POST /webhook/whatsapp` — internal JSON contract `{phone, text}`. Used by
+  tests, Postman, and any custom integration. No signature verification.
+
+- `POST /webhook/whatsapp/twilio` — Twilio-shaped inbound. Validates
+  `X-Twilio-Signature`, parses the form body, runs the same devotee-flow
+  pipeline, then sends the reply back to the user via the Twilio REST API.
+  Returns 503 when `TWILIO_ENABLED=false` so a misconfigured deploy fails
+  loudly instead of silently dropping messages.
 """
 
 import logging
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.schemas.devotee import BotReply, IncomingWhatsAppMessage
-from app.services import devotee_flow
+from app.services import devotee_flow, whatsapp
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhook", tags=["webhook"])
@@ -24,7 +29,7 @@ router = APIRouter(prefix="/webhook", tags=["webhook"])
     "/whatsapp",
     response_model=BotReply,
     status_code=status.HTTP_200_OK,
-    summary="Inbound WhatsApp message",
+    summary="Inbound WhatsApp message (internal JSON)",
     description=(
         "Drives the 10-step user journey. The bridge calls this once per "
         "inbound message and sends the returned `text` back to the user.\n\n"
@@ -62,3 +67,75 @@ def incoming(msg: IncomingWhatsAppMessage, db: Session = Depends(get_db)):
     reply = devotee_flow.handle_incoming(db, msg)
     db.commit()
     return reply
+
+
+@router.post(
+    "/whatsapp/twilio",
+    status_code=status.HTTP_200_OK,
+    summary="Twilio WhatsApp webhook",
+    description=(
+        "Form-encoded inbound from Twilio's WhatsApp sandbox or production "
+        "number. The route:\n\n"
+        "1. Validates `X-Twilio-Signature` (HMAC-SHA1 of URL + sorted form "
+        "params). Mismatch → 403.\n"
+        "2. Strips `whatsapp:+` from the `From` field → normalised phone.\n"
+        "3. Runs the same `devotee_flow.handle_incoming` pipeline as the "
+        "internal route.\n"
+        "4. Posts the reply back via the Twilio Messages REST API.\n\n"
+        "Set `TWILIO_WEBHOOK_URL` to the **exact** URL Twilio is configured "
+        "to call (signature is computed over this URL — a mismatch fails "
+        "verification). When developing locally, expose `/webhook/whatsapp/"
+        "twilio` via ngrok and paste that URL in both Twilio and "
+        "`TWILIO_WEBHOOK_URL`.\n\n"
+        "Returns 503 when `TWILIO_ENABLED=false`."
+    ),
+    responses={
+        200: {"description": "Inbound accepted; reply sent (or attempted)."},
+        403: {"description": "Signature missing or invalid."},
+        400: {"description": "Body missing required fields after parse."},
+        503: {"description": "Twilio bridge disabled."},
+    },
+)
+async def twilio_inbound(request: Request, db: Session = Depends(get_db)):
+    if not whatsapp.is_enabled():
+        raise HTTPException(
+            status_code=503, detail="Twilio bridge disabled (TWILIO_ENABLED=false)"
+        )
+    parsed = await whatsapp.parse_inbound(request)
+    if parsed is None:
+        raise HTTPException(status_code=403, detail="Invalid Twilio request")
+
+    # Idempotency: Twilio retries on 5xx/timeout — skip if we already handled
+    # this MessageSid. Returns 200 with `duplicate: true` so Twilio stops.
+    if whatsapp.is_duplicate_message(parsed.message_id):
+        logger.info(
+            "Twilio retry ignored sid=%s to=%s",
+            parsed.message_id,
+            whatsapp.redact_phone(parsed.phone),
+        )
+        return {
+            "accepted": True,
+            "duplicate": True,
+            "to": whatsapp.redact_phone(parsed.phone),
+        }
+
+    try:
+        msg = IncomingWhatsAppMessage(phone=parsed.phone, text=parsed.text)
+    except Exception as exc:
+        logger.warning("Twilio payload failed validation: %s", exc)
+        raise HTTPException(status_code=400, detail="Bad inbound payload")
+
+    reply = devotee_flow.handle_incoming(db, msg)
+    db.commit()
+
+    result = whatsapp.send_text(parsed.phone, reply.text)
+    return {
+        "accepted": True,
+        "to": whatsapp.redact_phone(parsed.phone),
+        "reply_state": reply.state,
+        "send": {
+            "sent": result.sent,
+            "provider_message_id": result.provider_message_id,
+            "error": result.error,
+        },
+    }
