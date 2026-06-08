@@ -70,8 +70,11 @@ arunachalamgpt-gpt-backend/
     │   ├── prediction.py        # Feature 1: avg waits from crowd_history
     │   ├── planning.py          # Feature 1: Step 3 advice (elderly/children)
     │   ├── admin_commands.py    # Feature 1: ADMIN config|crowd|broadcast parser
-    │   ├── devotee_flow.py      # Feature 1: 10-step state machine
+    │   ├── devotee_flow.py      # Feature 1: 10-step state machine (LLM-first, keyword fallback)
     │   ├── temple_config.py     # Feature 1: key/value CRUD + seed defaults
+    │   ├── llm.py               # Feature 1: OpenAI GPT-4o client wrapper
+    │   ├── intent.py            # Feature 1: LLM intent classifier (romanized text aware)
+    │   ├── translator.py        # Feature 1: reply translator into devotee's language
     │   ├── booking.py           # Feature 6: create / confirm / cancel + refund rule
     │   ├── availability.py      # Feature 6: daily updates + auto increment/decrement
     │   └── pricing.py           # Feature 6: normal/Pournami/Karthigai price selection
@@ -219,9 +222,10 @@ pytest
 ```
 
 The run enforces **100% line coverage** of `app/` (`--cov-fail-under=100`) — at
-last count **184 tests** covering models, schemas, services (parsers,
-fallback, state machine, refund rule), routers, middleware, handlers, the
-lifespan, and reflection of the OpenAPI schema. An HTML coverage report is
+last count **222 tests** covering models, schemas, services (parsers,
+fallback, state machine, refund rule, LLM wrapper, intent classifier,
+translator), routers, middleware, handlers, the lifespan, and reflection of
+the OpenAPI schema. An HTML coverage report is
 written to `htmlcov/`. Tests use an in-memory SQLite — production `psql` is
 never touched. The model layer stays Postgres-compatible because the
 `StringArray` type-decorator in [app/models/types.py](app/models/types.py)
@@ -267,6 +271,10 @@ All settings come from environment variables (loaded from `.env`).
 | `CORS_ORIGINS` | `*` | Comma-separated list of allowed origins for CORS. |
 | `MAX_REQUEST_BODY_BYTES` | `1048576` | Reject requests with a Content-Length above this (1 MiB default). |
 | `LOCAL_TZ_OFFSET_MINUTES` | `330` | Minutes offset from UTC for "today" and the 24-hour refund window (IST = 330). |
+| `OPENAI_ENABLED` | `false` | Master switch for the GPT-4o intent classifier + reply translator. Off in dev/tests. |
+| `OPENAI_API_KEY` | *(unset)* | OpenAI API key. Required when `OPENAI_ENABLED=true`. |
+| `OPENAI_MODEL` | `gpt-4o-mini` | Model name. `gpt-4o-mini` is cheaper; switch to `gpt-4o` for higher-quality translations. |
+| `OPENAI_TIMEOUT_SECONDS` | `8` | Per-request timeout. Short so a stalled call can't block a WhatsApp reply. |
 
 ## API map
 
@@ -372,6 +380,33 @@ ADMIN broadcast Tamil Crowd is low now!      ← returns parsed payload
 Unknown commands return `action: "unknown"` (HTTP 200) so the bridge can
 reply with a help message rather than crash.
 
+### GPT-4o intent classification + reply translation
+
+The WhatsApp dispatch ([app/services/devotee_flow.py](app/services/devotee_flow.py))
+runs an LLM **intent classifier first**, then falls back to keyword matching
+if the LLM is disabled or returns `unknown`. Outgoing text is then passed
+through a **translator** so the devotee sees the reply in their saved
+language.
+
+| Layer | File | Behaviour when `OPENAI_ENABLED=false` |
+| --- | --- | --- |
+| Client wrapper | [app/services/llm.py](app/services/llm.py) | `chat_json`/`chat_text` raise `LLMUnavailableError`; never makes a network call. |
+| Intent classifier | [app/services/intent.py](app/services/intent.py) | Returns `IntentResult(intent="unknown")` so the keyword path runs. |
+| Translator | [app/services/translator.py](app/services/translator.py) | Pass-through (English in, English out). |
+
+This means dev + the test suite work without an API key, and prod can flip
+`OPENAI_ENABLED=true` once the key is provisioned. Defaults:
+- Model `gpt-4o-mini` (cheap; bump to `gpt-4o` for higher-quality translation)
+- `temperature=0` for intent (deterministic JSON), `0.2` for translation
+- 8-second per-request timeout
+- Any LLM failure (network, auth, rate limit, non-JSON, timeout) is logged
+  and silently falls back — the bot never crashes because OpenAI is down
+
+**Intents recognised** (`select_language`, `register_visit`, `ask_crowd`,
+`ask_plan`, `change_language`, `unknown`). The classifier understands
+romanized text (*"crowd enna"*, *"ticket epdi"*, *"kuthukal enna ippo"*),
+code-mix, and misspellings.
+
 ## Robustness guarantees
 
 - **Anti-oversell.** `decrement`/`set_availability` take a `SELECT ... FOR UPDATE`
@@ -464,8 +499,6 @@ stable; clients should switch on it rather than the human-readable
 **Feature 1 — Crowd Alert:**
 - WhatsApp bridge (Twilio / 360dialog) — wraps incoming text and forwards
   outgoing replies; the REST surface is the contract it integrates with
-- OpenAI GPT-4o translation for replies in the user's chosen language
-  (`BotReply.language` already carries the target code)
 - APScheduler jobs for the D-2 (7 am), D-1 (7 pm), morning-of (6 am) push
   templates from Steps 5–7 of the design doc
 - Broadcast send-out — `ADMIN broadcast` parses and returns a payload; the

@@ -2,7 +2,7 @@
   "info": {
     "name": "ArunachalamGPT — Feature 1 (Crowd Alert)",
     "_postman_id": "c2a8f5d4-1e6b-4f0a-9c2d-5b8e6f3a2d1c",
-    "description": "Crowd reporting, live status with fallback, predictions, devotee profile, planning advice, admin commands, and the WhatsApp webhook driving the 10-step user journey.\n\n**End-to-end smoke test:**\n1. *Admin / Upsert config — temple_open_time* (seed defaults — optional)\n2. *Crowd / Submit raw volunteer message* — captures live status\n3. *Crowd / Get current* — should return `freshness: live`\n4. *Webhook / First contact (Hi)* — language menu\n5. *Webhook / Pick language (1=Tamil)* — saved\n6. *Webhook / Register visit date* — saves planned date + flags\n7. *Webhook / Ask for plan* — returns Step 3 recommendation\n8. *Admin / Run command — ADMIN config rs50_sold_out true* — flips sold-out\n9. *Crowd / Get current* — shows rs50_sold_out: true",
+    "description": "Crowd reporting, live status with fallback, predictions, devotee profile, planning advice, admin commands, and the WhatsApp webhook driving the 10-step user journey.\n\n## OpenAI GPT-4o behaviour on `POST /webhook/whatsapp`\n\nDispatch order per turn:\n1. **LLM intent classifier** (fires only when `OPENAI_ENABLED=true`) — understands romanized Indic text and code-mix.\n2. **Keyword matcher** — runs when LLM is disabled OR returns `unknown`.\n3. **Translator** — outgoing text rendered in devotee's saved language. English is pass-through.\n\nThe *LLM …* requests in the Webhook folder exercise the romanized-text path. Without OpenAI, they fall through to the keyword path and reply in English.\n\n**End-to-end smoke test:**\n1. *Admin / Upsert config — temple_open_time* (seed defaults — optional)\n2. *Crowd / Submit raw volunteer message* — captures live status\n3. *Crowd / Get current* — should return `freshness: live`\n4. *Webhook / First contact (Hi)* — language menu\n5. *Webhook / Pick language (1=Tamil)* — saved\n6. *Webhook / Register visit date* — saves planned date + flags\n7. *Webhook / Ask for plan* — returns Step 3 recommendation\n8. *Webhook / LLM — romanized Tamil crowd query* — exercises GPT-4o (with `OPENAI_ENABLED=true`)\n9. *Admin / Run command — ADMIN config rs50_sold_out true* — flips sold-out\n10. *Crowd / Get current* — shows rs50_sold_out: true",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -282,6 +282,59 @@
               "host": ["{{baseUrl}}"],
               "path": ["webhook", "whatsapp"]
             }
+          },
+          "response": []
+        },
+        {
+          "name": "LLM — romanized Tamil crowd query",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"crowd enna ippo?\"\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] },
+            "description": "Requires OPENAI_ENABLED=true. With LLM off this still works via the keyword path (matches `crowd`)."
+          },
+          "response": []
+        },
+        {
+          "name": "LLM — romanized Tamil planning query",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"epdi varuvadhu best time?\"\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] }
+          },
+          "response": []
+        },
+        {
+          "name": "LLM — romanized Hindi language switch",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"hindi me bolo\"\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] },
+            "description": "Keyword path can't handle this — LLM picks `change_language` with target=hindi."
+          },
+          "response": []
+        },
+        {
+          "name": "LLM — code-mix visit registration",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"amma ku visit on 15/06/2026\"\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] },
+            "description": "LLM extracts visit_date + has_elderly from 'amma'."
+          },
+          "response": []
+        },
+        {
+          "name": "LLM — free-form crowd question",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{devotee_phone}}\",\n  \"text\": \"how long will I have to stand if I come tomorrow at 8 am\"\n}" },
+            "url": { "raw": "{{baseUrl}}/webhook/whatsapp", "host": ["{{baseUrl}}"], "path": ["webhook", "whatsapp"] }
           },
           "response": []
         }

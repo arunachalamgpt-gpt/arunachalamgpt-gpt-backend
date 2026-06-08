@@ -94,8 +94,30 @@ class IncomingWhatsAppMessage(BaseModel):
                     },
                 },
                 {
-                    "summary": "Step 8/9 — live crowd query",
+                    "summary": "Step 8/9 — live crowd query (English)",
                     "value": {"phone": "9876543210", "text": "crowd now?"},
+                },
+                {
+                    "summary": "Romanized Tamil — crowd query (requires OPENAI_ENABLED=true)",
+                    "value": {"phone": "9876543210", "text": "crowd enna ippo"},
+                },
+                {
+                    "summary": "Romanized Tamil — planning query",
+                    "value": {
+                        "phone": "9876543210",
+                        "text": "epdi varuvadhu best time?",
+                    },
+                },
+                {
+                    "summary": "Romanized Hindi — language switch",
+                    "value": {"phone": "9876543210", "text": "hindi me bolo"},
+                },
+                {
+                    "summary": "Code-mix — visit registration",
+                    "value": {
+                        "phone": "9876543210",
+                        "text": "amma ku visit on 15/06/2026",
+                    },
                 },
             ]
         }
