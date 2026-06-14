@@ -338,4 +338,11 @@ def test_send_text_truncates_oversize_body(monkeypatch):
 
 
 def test_truncate_pass_through_small_body():
-    assert whatsapp._truncate_for_whatsapp("short") == "short"
+    assert whatsapp.truncate_for_whatsapp("short") == "short"
+
+
+def test_truncate_clamps_long_body():
+    huge = "x" * (whatsapp.MAX_OUTBOUND_BODY + 50)
+    out = whatsapp.truncate_for_whatsapp(huge)
+    assert len(out) == whatsapp.MAX_OUTBOUND_BODY
+    assert out.endswith("…")

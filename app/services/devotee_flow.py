@@ -36,6 +36,7 @@ from app.services import crowd as crowd_svc
 from app.services import intent as intent_svc
 from app.services import planning as planning_svc
 from app.services import translator as translator_svc
+from app.services import whatsapp as whatsapp_svc
 
 logger = logging.getLogger(__name__)
 
@@ -309,6 +310,8 @@ def handle_incoming(db: Session, msg: IncomingWhatsAppMessage) -> BotReply:
             "Ask me about crowd, tickets or timings any time. "
             "When you're ready, share your visit date (YYYY-MM-DD)."
         )
+        # Truncate BEFORE translation so we don't pay LLM cost on chars we'd cut.
+        reply_text = whatsapp_svc.truncate_for_whatsapp(reply_text)
         return BotReply(
             phone=msg.phone,
             text=translator_svc.translate(reply_text, picked),
@@ -323,5 +326,7 @@ def handle_incoming(db: Session, msg: IncomingWhatsAppMessage) -> BotReply:
         reply = _dispatch_keywords(db, profile, msg.phone, text)
 
     db.flush()
+    # Cap the English text first → cheaper LLM call, predictable max body.
+    reply.text = whatsapp_svc.truncate_for_whatsapp(reply.text)
     reply.text = translator_svc.translate(reply.text, profile.language)
     return reply

@@ -100,7 +100,13 @@ def _reset_seen_for_tests() -> None:
         _seen_message_ids.clear()
 
 
-def _truncate_for_whatsapp(text: str) -> str:
+def truncate_for_whatsapp(text: str) -> str:
+    """Clamp `text` to the WhatsApp/Twilio body limit. Adds an ellipsis when cut.
+
+    Public so callers (like `devotee_flow`) can truncate *before* sending the
+    text through the translator — we'd otherwise pay LLM cost translating
+    characters we'd just discard.
+    """
     if len(text) <= MAX_OUTBOUND_BODY:
         return text
     return text[: MAX_OUTBOUND_BODY - 1] + "…"
@@ -194,7 +200,7 @@ def send_text(phone: str, text: str) -> SendResult:
         f"https://api.twilio.com/2010-04-01/Accounts/"
         f"{TWILIO_ACCOUNT_SID}/Messages.json"
     )
-    body = _truncate_for_whatsapp(text)
+    body = truncate_for_whatsapp(text)
     data = {
         "From": f"whatsapp:{TWILIO_FROM_NUMBER}",
         "To": f"whatsapp:+{phone.lstrip('+')}",

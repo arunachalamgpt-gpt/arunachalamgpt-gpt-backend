@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>ArunachalamGPT Backend — Implemented Flows</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1b232b;
+    --text: #d7dde3;
+    --muted: #8b96a3;
+    --accent: #6cb6ff;
+    --ok: #4ade80;
+    --warn: #facc15;
+    --bad: #f87171;
+    --border: #2a333d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 24px 32px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(135deg, #16203a 0%, #0f1419 100%);
+  }
+  header h1 { margin: 0 0 6px; font-size: 22px; color: var(--accent); }
+  header p { margin: 0; color: var(--muted); font-size: 14px; }
+  .layout {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: 0;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  nav {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    padding: 24px 16px;
+    border-right: 1px solid var(--border);
+    max-height: 100vh;
+    overflow-y: auto;
+  }
+  nav h3 {
+    text-transform: uppercase;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    margin: 16px 0 8px;
+  }
+  nav a {
+    display: block;
+    color: var(--text);
+    text-decoration: none;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 14px;
+    margin: 2px 0;
+  }
+  nav a:hover { background: var(--panel); color: var(--accent); }
+  main { padding: 24px 32px 80px; }
+  section { margin-bottom: 56px; scroll-margin-top: 16px; }
+  section h2 {
+    color: var(--accent);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+    font-size: 20px;
+  }
+  section h3 { font-size: 16px; color: #c1d0e0; }
+  section p { color: var(--muted); }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin: 12px 0;
+    padding: 12px 16px;
+    background: var(--panel);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .legend span { display: flex; align-items: center; gap: 6px; }
+  .legend .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+  .dot-ok { background: var(--ok); }
+  .dot-warn { background: var(--warn); }
+  .dot-bad { background: var(--bad); }
+  .dot-acc { background: var(--accent); }
+  .chart {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin: 12px 0 18px;
+    overflow-x: auto;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--accent); font-weight: 600; }
+  code {
+    background: var(--panel);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #c1d0e0;
+  }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-right: 6px;
+  }
+  .pill-ok { background: rgba(74, 222, 128, 0.15); color: var(--ok); }
+  .pill-warn { background: rgba(250, 204, 21, 0.15); color: var(--warn); }
+  .pill-bad { background: rgba(248, 113, 113, 0.15); color: var(--bad); }
+  .pill-acc { background: rgba(108, 182, 255, 0.15); color: var(--accent); }
+  footer {
+    text-align: center;
+    color: var(--muted);
+    padding: 24px;
+    font-size: 13px;
+    border-top: 1px solid var(--border);
+  }
+  @media (max-width: 880px) {
+    .layout { grid-template-columns: 1fr; }
+    nav {
+      position: static;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+      max-height: none;
+    }
+  }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
+      background: '#1b232b',
+      primaryColor: '#1b232b',
+      primaryTextColor: '#d7dde3',
+      primaryBorderColor: '#6cb6ff',
+      lineColor: '#8b96a3',
+      tertiaryColor: '#0f1419',
+    },
+    flowchart: { curve: 'basis', useMaxWidth: true },
+    sequence: { useMaxWidth: true },
+  });
+</script>
+</head>
+<body>
+
+<header>
+  <h1>ArunachalamGPT Backend — Implemented Flows</h1>
+  <p>Every decision branch in the running code. Generated from a top-to-bottom read of <code>app/services</code> and <code>app/routers</code>. 252 tests, 100% line coverage.</p>
+</header>
+
+<div class="layout">
+
+<nav>
+  <h3>Top level</h3>
+  <a href="#overview">Architecture overview</a>
+  <a href="#twilio-inbound">Twilio webhook</a>
+  <a href="#internal-webhook">Internal webhook</a>
+
+  <h3>Feature 1 — Crowd Alert</h3>
+  <a href="#devotee-flow">Devotee state machine</a>
+  <a href="#llm-dispatch">LLM intent dispatch</a>
+  <a href="#keyword-fallback">Keyword fallback</a>
+  <a href="#crowd-fallback">Crowd freshness fallback</a>
+  <a href="#volunteer-parser">Volunteer message parser</a>
+  <a href="#admin-commands">Admin command dispatch</a>
+  <a href="#translator">Reply translator</a>
+
+  <h3>Feature 6 — Lodge Booking</h3>
+  <a href="#booking-create">Booking creation + retry</a>
+  <a href="#booking-cancel">Cancellation + refund rule</a>
+  <a href="#lodge-search">Lodge search with backups</a>
+
+  <h3>Cross-cutting</h3>
+  <a href="#errors">Error envelope flow</a>
+  <a href="#middleware">Request middleware stack</a>
+  <a href="#http-codes">HTTP status reference</a>
+</nav>
+
+<main>
+
+<!-- ============================================================ -->
+<section id="overview">
+  <h2>1. Architecture overview</h2>
+  <p>Layered FastAPI service. Twilio + OpenAI sit at the edges and are gated by feature flags so dev/tests run without credentials.</p>
+  <div class="legend">
+    <span><span class="dot dot-acc"></span> route / async</span>
+    <span><span class="dot dot-ok"></span> business logic</span>
+    <span><span class="dot dot-warn"></span> external SDK</span>
+    <span><span class="dot dot-bad"></span> persistence</span>
+  </div>
+  <div class="chart">
+<pre class="mermaid">
+flowchart LR
+    User[WhatsApp user]:::edge
+    Twilio[Twilio WhatsApp]:::ext
+    OpenAI[OpenAI GPT-4o]:::ext
+    User <--> Twilio
+
+    Twilio -->|POST form| TwilioRoute[/webhook/whatsapp/twilio/]:::route
+    Postman[Postman / curl] -->|POST JSON| Internal[/webhook/whatsapp/]:::route
+
+    TwilioRoute --> WhatsappSvc[whatsapp.parse_inbound<br/>verify HMAC-SHA1]:::biz
+    WhatsappSvc --> Dedup{is_duplicate_message?}:::biz
+    Dedup -- yes --> Done200[200 duplicate: true]:::route
+    Dedup -- no --> Flow
+
+    Internal --> Flow[devotee_flow.handle_incoming]:::biz
+
+    Flow --> Profile[(devotee_profiles)]:::db
+    Flow --> Intent[intent.classify]:::biz
+    Intent -.if enabled.-> OpenAI
+    Flow --> Crowd[crowd.current_status]:::biz
+    Crowd --> CrowdDb[(crowd_status<br/>temple_config)]:::db
+    Flow --> Planning[planning.recommend]:::biz
+    Flow --> Translator[translator.translate]:::biz
+    Translator -.if enabled.-> OpenAI
+
+    Flow --> Reply[BotReply]:::biz
+    TwilioRoute --> Send[whatsapp.send_text<br/>truncate to 1500]:::biz
+    Send --> Twilio
+    Internal --> JsonOut[JSON BotReply]:::route
+
+    classDef route fill:#1b3a5c,stroke:#6cb6ff,color:#d7dde3
+    classDef biz fill:#1f3d2b,stroke:#4ade80,color:#d7dde3
+    classDef ext fill:#4a3a14,stroke:#facc15,color:#d7dde3
+    classDef db fill:#3d1f1f,stroke:#f87171,color:#d7dde3
+    classDef edge fill:#1b232b,stroke:#8b96a3,color:#d7dde3
+</pre>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="twilio-inbound">
+  <h2>2. Twilio webhook flow</h2>
+  <p><code>POST /webhook/whatsapp/twilio</code> — every branch from receiving the form-encoded body to returning the JSON envelope.</p>
+  <div class="chart">
+<pre class="mermaid">
+flowchart TD
+    Start([Twilio POST<br/>form-encoded]):::edge
+    Start --> Enabled{TWILIO_ENABLED<br/>and SID and TOKEN?}:::dec
+    Enabled -- no --> R503[503<br/>twilio_disabled]:::bad
+    Enabled -- yes --> ParseForm[await request.form&#40;&#41;]:::biz
+    ParseForm --> ParseErr{form parse<br/>raised?}:::dec
+    ParseErr -- yes --> R403a[403 Invalid<br/>parse_inbound returned None]:::bad
+    ParseErr -- no --> SigHeader{X-Twilio-Signature<br/>present?}:::dec
+    SigHeader -- no --> R403a
+    SigHeader -- yes --> TokenCheck{TWILIO_AUTH_TOKEN<br/>non-empty?}:::dec
+    TokenCheck -- no --> R403a
+    TokenCheck -- yes --> VerifySig[HMAC-SHA1 of<br/>URL + sorted params]:::biz
+    VerifySig --> SigOk{compare_digest<br/>matches?}:::dec
+    SigOk -- no --> R403a
+    SigOk -- yes --> StripPhone["From → strip<br/>'whatsapp:+'"]:::biz
+    StripPhone --> PhoneOk{phone non-empty?}:::dec
+    PhoneOk -- no --> R403a
+    PhoneOk -- yes --> BodyOk{Body non-empty?}:::dec
+    BodyOk -- no --> R403a
+    BodyOk -- yes --> Dup{is_duplicate_message<br/>MessageSid?}:::dec
+    Dup -- yes --> R200Dup[200<br/>duplicate: true<br/>NO state change<br/>NO outbound send]:::ok
+    Dup -- no --> Validate[IncomingWhatsAppMessage<br/>Pydantic validate<br/>pattern + max_length=4000]:::biz
+    Validate --> ValidOk{passes?}:::dec
+    ValidOk -- no --> R400[400 Bad inbound payload]:::bad
+    ValidOk -- yes --> Flow[devotee_flow.handle_incoming]:::biz
+    Flow --> Commit[db.commit&#40;&#41;]:::biz
+    Commit --> Send[whatsapp.send_text<br/>truncate to 1500 + …]:::biz
+    Send --> SendOk{HTTP 200<br/>from Twilio?}:::dec
+    SendOk -- yes --> R200Ok[200<br/>send.sent: true<br/>provider_message_id]:::ok
+    SendOk -- no --> R200Soft[200<br/>send.sent: false<br/>error: http_4xx / timeout<br/>inbound still processed]:::warn
+
+    classDef ok fill:#1f3d2b,stroke:#4ade80,color:#d7dde3
+    classDef warn fill:#4a3a14,stroke:#facc15,color:#d7dde3
+    classDef bad fill:#3d1f1f,stroke:#f87171,color:#d7dde3
+    classDef biz fill:#1b3a5c,stroke:#6cb6ff,color:#d7dde3
+    classDef dec fill:#2a333d,stroke:#8b96a3,color:#d7dde3
+    classDef edge fill:#1b232b,stroke:#8b96a3,color:#d7dde3
+</pre>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="internal-webhook">
+  <h2>3. Internal JSON webhook</h2>
+  <p><code>POST /webhook/whatsapp</code> — same downstream pipeline, but no signature check and the BotReply is returned directly. Used by tests, Postman, and any custom integration.</p>
+  <div class="chart">
+<pre class="mermaid">
+flowchart LR
+    A([POST JSON<br/>{phone, text}]):::edge
+    A --> V[Pydantic validate<br/>IncomingWhatsAppMessage]:::biz
+    V --> Vok{valid?}:::dec
+    Vok -- no --> R422[422 validation_failed]:::bad
+    Vok -- yes --> Flow[devotee_flow.handle_incoming]:::biz
+    Flow --> Commit[db.commit]:::biz
+    Commit --> R200[200 BotReply<br/>phone, text, language, state, metadata]:::ok
+
+    classDef ok fill:#1f3d2b,stroke:#4ade80,color:#d7dde3
+    classDef bad fill:#3d1f1f,stroke:#f87171,color:#d7dde3
+    classDef biz fill:#1b3a5c,stroke:#6cb6ff,color:#d7dde3
+    classDef dec fill:#2a333d,stroke:#8b96a3,color:#d7dde3
+    classDef edge fill:#1b232b,stroke:#8b96a3,color:#d7dde3
+</pre>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="devotee-flow">
+  <h2>4. Devotee state machine</h2>
+  <p><code>devotee_flow.handle_incoming</code> — full per-turn dispatch including the numeric fast-path and the LLM-then-keyword fallback.</p>
+  <div class="chart">
+<pre class="mermaid">
+flowchart TD
+    Start([IncomingWhatsAppMessage<br/>phone, text]):::edge
+    Start --> Profile[_get_or_create_profile]:::biz
+    Profile --> NewProfile{profile.language<br/>== None?}:::dec
+
+    NewProfile -- yes --> Numeric{text in '1'..'5'?}:::dec
+    Numeric -- yes --> SetLang[set profile.language<br/>state → language_selected]:::biz
+    Numeric -- no --> LLMLang[intent.classify]:::biz
+    LLMLang --> LLMLangOk{intent ==<br/>select_language<br/>with valid code?}:::dec
+    LLMLangOk -- no --> Menu[200 language menu<br/>state stays 'new']:::warn
+    LLMLangOk -- yes --> SetLang
+    SetLang --> AckLang[acknowledge message]:::biz
+    AckLang --> Translate1[translator.translate]:::biz
+    Translate1 --> ReturnLang[return BotReply]:::ok
+
+    NewProfile -- no --> LLM[intent.classify]:::biz
+    LLM --> LLMResult{LLM result intent}:::dec
+    LLMResult -->|register_visit| RegV[_dispatch_intent: visit]:::biz
+    LLMResult -->|ask_crowd| AskC[_dispatch_intent: crowd]:::biz
+    LLMResult -->|ask_plan| AskP[_dispatch_intent: plan]:::biz
+    LLMResult -->|change_language| ChL[_dispatch_intent: change_lang]:::biz
+    LLMResult -->|unknown / failed| Kw[_dispatch_keywords]:::biz
+
+    RegV --> RegVOk{visit_date<br/>parses as ISO?}:::dec
+    RegVOk -- no --> Kw
+    RegVOk -- yes --> SaveVisit[save planned_visit_date<br/>+ family flags<br/>state → registered]:::biz
+
+    ChL --> ChLOk{target_language<br/>in slots?}:::dec
+    ChLOk -- no --> Kw
+    ChLOk -- yes --> SaveLang[update profile.language]:::biz
+
+    Kw --> KwBranch{first match?}:::dec
+    KwBranch -->|date regex<br/>YYYY-MM-DD or DD/MM/YYYY| KwVisit[save planned_visit_date<br/>state → registered<br/>infer elderly/children<br/>from keywords]:::biz
+    KwBranch -->|crowd&#124;queue&#124;line&#124;wait&#124;now| KwCrowd[current_status snapshot]:::biz
+    KwBranch -->|plan&#124;advice&#124;when&#124;best time| KwPlan[planning.recommend]:::biz
+    KwBranch -->|change/switch to lang| KwLang[update profile.language]:::biz
+    KwBranch -->|none| Help[help text]:::warn
+
+    SaveVisit --> Translate2
+    AskC --> Translate2
+    AskP --> Translate2
+    SaveLang --> Translate2
+    KwVisit --> Translate2
+    KwCrowd --> Translate2
+    KwPlan --> Translate2
+    KwLang --> Translate2
+    Help --> Translate2
+
+    Translate2[translator.translate<br/>into profile.language]:::biz --> Flush[db.flush]:::biz
+    Flush --> Return[return BotReply]:::ok
+
+    classDef ok fill:#1f3d2b,stroke:#4ade80,color:#d7dde3
+    classDef warn fill:#4a3a14,stroke:#facc15,color:#d7dde3
+    classDef biz fill:#1b3a5c,stroke:#6cb6ff,color:#d7dde3
+    classDef dec fill:#2a333d,stroke:#8b96a3,color:#d7dde3
+    classDef edge fill:#1b232b,stroke:#8b96a3,color:#d7dde3
+</pre>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="llm-dispatch">
+  <h2>5. LLM intent classifier</h2>
+  <p><code>intent.classify</code> — every guard between the user's text and a typed <code>IntentResult</code>. Returns <code>unknown</code> on any failure so the caller falls back to keywords.</p>
+  <div class="chart">
+<pre class="mermaid">
+flowchart TD
+    Start([text]):::edge
+    Start --> En{llm.is_enabled?}:::dec
+    En -- no --> Unk[IntentResult unknown]:::warn
+    En -- yes --> Call[llm.chat_json<br/>JSON mode, temp 0]:::biz
+    Call --> Err{LLMUnavailableError?}:::dec
+    Err -- yes --> Unk
+    Err -- no --> Intent{intent in<br/>VALID_INTENTS?}:::dec
+    Intent -- no --> Unk
+
+    Intent -- select_language --> Code{language_code in<br/>{'1','2','3','4','5'}?}:::dec
+    Code -- yes --> OkLang[IntentResult<br/>+ language_code]:::ok
+    Code -- no --> Unk
+
+    Intent -- register_visit --> Date{visit_date<br/>parses with<br/>date.fromisoformat?}:::dec
+    Date -- yes --> OkV[IntentResult<br/>+ visit_date<br/>+ has_elderly<br/>+ has_children]:::ok
+    Date -- no --> OkVnoD[IntentResult<br/>has_elderly + has_children<br/>visit_date dropped]:::warn
+
+    Intent -- ask_crowd --> OkC[IntentResult empty slots]:::ok
+    Intent -- ask_plan --> OkP[IntentResult empty slots]:::ok
+
+    Intent -- change_language --> Lang{target in<br/>VALID_LANGUAGES?}:::dec
+    Lang -- yes --> OkCL[IntentResult<br/>+ target_language]:::ok
+    Lang -- no --> Unk
+
+    Intent -- unknown --> OkU[IntentResult unknown]:::ok
+
+    classDef ok fill:#1f3d2b,stroke:#4ade80,color:#d7dde3
+    classDef warn fill:#4a3a14,stroke:#facc15,color:#d7dde3
+    classDef biz fill:#1b3a5c,stroke:#6cb6ff,color:#d7dde3
+    classDef dec fill:#2a333d,stroke:#8b96a3,color:#d7dde3
+    classDef edge fill:#1b232b,stroke:#8b96a3,color:#d7dde3
+</pre>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="keyword-fallback">
+  <h2>6. Keyword fallback (LLM-disabled path)</h2>
+  <p>Used when OpenAI is disabled OR intent classifier returned <code>unknown</code> OR a recognised intent had insufficient slots.</p>
+  <div class="chart">
+<pre class="mermaid">
+flowchart TD
+    A([text]):::edge --> D1{regex matches<br/>YYYY-MM-DD or<br/>DD/MM/YYYY?}:::dec
+    D1 -- yes --> V[save planned_visit_date<br/>detect elderly/children<br/>by substring]:::ok
+    D1 -- no --> D2{lowercased text has<br/>crowd/queue/line/wait/now?}:::dec
+    D2 -- yes --> C[current_status snapshot]:::ok
+    D2 -- no --> D3{has plan/advice/<br/>when/best time?}:::dec
+    D3 -- yes --> P[planning.recommend]:::ok
+    D3 -- no --> D4{startswith<br/>'change to' or<br/>'switch to'?}:::dec
+    D4 -- no --> Help[help text<br/>'I can help with...']:::warn
+    D4 -- yes --> D5{text contains<br/>tamil/telugu/<br/>kannada/hindi/english?}:::dec
+    D5 -- yes --> L[update profile.language]:::ok
+    D5 -- no --> Help
+
+    classDef ok fill:#1f3d2b,stroke:#4ade80,color:#d7dde3
+    classDef warn fill:#4a3a14,stroke:#facc15,color:#d7dde3
+    classDef dec fill:#2a333d,stroke:#8b96a3,color:#d7dde3
+    classDef edge fill:#1b232b,stroke:#8b96a3,color:#d7dde3
+</pre>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="crowd-fallback">
+  <h2>7. Crowd freshness fallback</h2>
+  <p><code>crowd.current_status</code> — implements Section 9 of the design doc.</p>
+  <div class="chart">
+<pre class="mermaid">
+flowchart TD
+    Start([GET /crowd/current]):::edge
+    Start --> Now[get now in IST<br/>LOCAL_TZ_OFFSET_MINUTES=330]:::biz
+    Now --> ReadCfg[read temple_open_time<br/>temple_close_time<br/>rs50_sold_out<br/>rs200_sold_out]:::biz
+    ReadCfg --> Hours{current_time<br/>in [open, close)?}:::dec
+    Hours -- no --> Closed[freshness: closed<br/>source: prediction<br/>message: 'Temple closed']:::warn
+
+    Hours -- yes --> Latest[SELECT * FROM crowd_status<br/>ORDER BY reported_at DESC<br/>LIMIT 1]:::biz
+    Latest --> HasRow{row exists?}:::dec
+    HasRow -- no --> NoData[freshness: prediction_only<br/>source: prediction<br/>message: 'No volunteer report']:::warn
+
+    HasRow -- yes --> Age[age_minutes =<br/>now - reported_at]:::biz
+    Age --> AgeCheck{age_minutes}:::dec
+    AgeCheck -->|&lt; 120| Live[freshness: live<br/>full report from row]:::ok
+    AgeCheck -->|120 to 360| Stale[freshness: stale<br/>full report + warning]:::warn
+    AgeCheck -->|&gt; 360| Old[freshness: prediction_only<br/>nulls + 'over 6 hours old']:::warn
+
+    classDef ok fill:#1f3d2b,stroke:#4ade80,color:#d7dde3
+    classDef warn fill:#4a3a14,stroke:#facc15,color:#d7dde3
+    classDef biz fill:#1b3a5c,stroke:#6cb6ff,color:#d7dde3
+    classDef dec fill:#2a333d,stroke:#8b96a3,color:#d7dde3
+    classDef edge fill:#1b232b,stroke:#8b96a3,color:#d7dde3
+</pre>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="volunteer-parser">
+  <h2>8. Volunteer message parser</h2>
+  <p><code>crowd.parse_volunteer_message</code> — converts <code>F:180 T50:40 T200:15</code> WhatsApp text into typed fields.</p>
+  <div class="chart">
+<pre class="mermaid">
+flowchart TD
+    A([raw text]):::edge --> Strip[strip + split on whitespace]:::biz
+    Strip --> Empty{no tokens?}:::dec
+    Empty -- yes --> Err1[ValidationFailedError<br/>'Empty crowd report']:::bad
+    Empty -- no --> Loop[for each token]:::biz
+    Loop --> Re{regex matches<br/>F|T50|T200 :<br/>digits or SOLD<br/>case-insensitive}:::dec
+    Re -- no --> Err2[ValidationFailedError<br/>'Unrecognised token']:::bad
+    Re -- yes --> Dup{key seen<br/>before?}:::dec
+    Dup -- yes --> Err3[ValidationFailedError<br/>'appears more than once']:::bad
+    Dup -- no --> Store[seen[key] = value.upper]:::biz
+    Store --> More{more tokens?}:::dec
+    More -- yes --> Loop
+    More -- no --> Build[build ParsedCrowdFields]:::biz
+    Build --> AsWait[for F, T50, T200:<br/>None → None, False<br/>'SOLD' → None, True<br/>'180' → 180, False]:::biz
+    AsWait --> Ret([return ParsedCrowdFields]):::ok
+
+    classDef ok fill:#1f3d2b,stroke:#4ade80,color:#d7dde3
+    classDef bad fill:#3d1f1f,stroke:#f87171,color:#d7dde3
+    classDef biz fill:#1b3a5c,stroke:#6cb6ff,color:#d7dde3
+    classDef dec fill:#2a333d,stroke:#8b96a3,color:#d7dde3
+    classDef edge fill:#1b232b,stroke:#8b96a3,color:#d7dde3
+</pre>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="admin-commands">
+  <h2>9. Admin command dispatch</h2>
+  <p><code>admin_commands.dispatch</code> — always returns 200 (never raises) so the bridge can reply with a help message.</p>
+  <div class="chart">
+<pre class="mermaid">
+flowchart TD
+    A([text + sender_phone]):::edge --> Pre{first token<br/>== ADMIN<br/>case-insensitive?}:::dec
+    Pre -- no --> Unk[action: unknown<br/>'did not begin with ADMIN']:::warn
+    Pre -- yes --> Verb{remainder<br/>has a verb?}:::dec
+    Verb -- no --> Unk
+    Verb -- yes --> Switch{verb.lower}:::dec
+
+    Switch -->|config| Cfg[split tail into<br/>key + value]:::biz
+    Cfg --> CfgOk{both present?}:::dec
+    CfgOk -- no --> Unk
+    CfgOk -- yes --> Upsert[temple_config.upsert<br/>updated_by = sender_phone]:::ok
+    Upsert --> CfgRet[action: config_set<br/>payload: {key, value}]:::ok
+
+    Switch -->|crowd| Cr[parse_volunteer_message]:::biz
+    Cr --> CrErr{ValidationFailedError?}:::dec
+    CrErr -- yes --> Unk
+    CrErr -- no --> Insert[record_status<br/>source = admin]:::ok
+    Insert --> CrRet[action: crowd_report<br/>payload: {id}]:::ok
+
+    Switch -->|broadcast| Br[split tail into<br/>language + message]:::biz
+    Br --> BrOk{both present?}:::dec
+    BrOk -- no --> Unk
+    BrOk -- yes --> BrRet[action: broadcast<br/>payload: {language, message}<br/>NOTE: no send-out yet]:::warn
+
+    Switch -->|other| Unk
+
+    classDef ok fill:#1f3d2b,stroke:#4ade80,color:#d7dde3
+    classDef warn fill:#4a3a14,stroke:#facc15,color:#d7dde3
+    classDef biz fill:#1b3a5c,stroke:#6cb6ff,color:#d7dde3
+    classDef dec fill:#2a333d,stroke:#8b96a3,color:#d7dde3
+    classDef edge fill:#1b232b,stroke:#8b96a3,color:#d7dde3
+</pre>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="translator">
+  <h2>10. Reply translator</h2>
+  <p><code>translator.translate</code> — pass-through except when GPT-4o is on AND target ≠ English.</p>
+  <div class="chart">
+<pre class="mermaid">
+flowchart LR
+    A([English text, target_language]):::edge
+    A --> B{text empty?}:::dec
+    B -- yes --> R0[return text]:::ok
+    B -- no --> C{target is<br/>None or 'english'?}:::dec
+    C -- yes --> R0
+    C -- no --> D{target in<br/>VALID_LANGUAGES?}:::dec
+    D -- no --> R0
+    D -- yes --> E{llm.is_enabled?}:::dec
+    E -- no --> R0
+    E -- yes --> Call[llm.chat_text<br/>temp 0.2<br/>preserve numbers, dates,<br/>Rs.50, Rs.200, proper nouns]:::biz
+    Call --> CallErr{LLMUnavailableError?}:::dec
+    CallErr -- yes --> R0
+    CallErr -- no --> Ret([translated text in<br/>native script]):::ok
+
+    classDef ok fill:#1f3d2b,stroke:#4ade80,color:#d7dde3
+    classDef biz fill:#1b3a5c,stroke:#6cb6ff,color:#d7dde3
+    classDef dec fill:#2a333d,stroke:#8b96a3,color:#d7dde3
+    classDef edge fill:#1b232b,stroke:#8b96a3,color:#d7dde3
+</pre>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="booking-create">
+  <h2>11. Booking creation + retry</h2>
+  <p><code>booking.create_booking</code> — note the savepoint preserves the availability decrement across ref collisions.</p>
+  <div class="chart">
+<pre class="mermaid">
+flowchart TD
+    A([POST /bookings<br/>Idempotency-Key?]):::edge
+    A --> Idem{idempotency_key<br/>provided?}:::dec
+    Idem -- yes --> Find[SELECT booking<br/>WHERE idempotency_key = ?]:::biz
+    Find --> FExist{found?}:::dec
+    FExist -- yes --> Ret([return existing booking]):::ok
+    FExist -- no --> GetLodge
+    Idem -- no --> GetLodge[db.get Lodge]:::biz
+    GetLodge --> Found{lodge found?}:::dec
+    Found -- no --> E404[LodgeNotFoundError 404]:::bad
+    Found -- yes --> Verified{lodge.verified?}:::dec
+    Verified -- no --> E400[LodgeNotVerifiedError 400]:::bad
+    Verified -- yes --> Lock[availability.decrement<br/>SELECT ... FOR UPDATE]:::biz
+    Lock --> Rooms{rooms_available<br/>&gt; 0?}:::dec
+    Rooms -- no --> E409[NoRoomsAvailableError 409]:::bad
+    Rooms -- yes --> Loop[attempt = 0]:::biz
+    Loop --> SP[savepoint = db.begin_nested]:::biz
+    SP --> GenRef[_generate_booking_ref<br/>TVM-LODGE-XXXXXX<br/>Crockford alphabet]:::biz
+    GenRef --> Insert[INSERT lodge_bookings]:::biz
+    Insert --> Result{IntegrityError?}:::dec
+    Result -- yes --> Roll[savepoint.rollback<br/>decrement PRESERVED]:::warn
+    Roll --> Count{attempt &lt;<br/>BOOKING_REF_MAX_RETRIES = 5?}:::dec
+    Count -- yes --> Loop
+    Count -- no --> EConf[ConflictError 409<br/>could not allocate ref]:::bad
+    Result -- no --> Commit[savepoint.commit]:::biz
+    Commit --> RetOk([return new booking<br/>status: pending]):::ok
+
+    classDef ok fill:#1f3d2b,stroke:#4ade80,color:#d7dde3
+    classDef warn fill:#4a3a14,stroke:#facc15,color:#d7dde3
+    classDef bad fill:#3d1f1f,stroke:#f87171,color:#d7dde3
+    classDef biz fill:#1b3a5c,stroke:#6cb6ff,color:#d7dde3
+    classDef dec fill:#2a333d,stroke:#8b96a3,color:#d7dde3
+    classDef edge fill:#1b232b,stroke:#8b96a3,color:#d7dde3
+</pre>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="booking-cancel">
+  <h2>12. Cancellation + refund rule</h2>
+  <p><code>booking.cancel_booking</code> — 24h rule computed in IST.</p>
+  <div class="chart">
+<pre class="mermaid">
+flowchart TD
+    A([POST /bookings/{ref}/cancel<br/>cancelled_by_lodge?]):::edge
+    A --> Find[SELECT booking<br/>BY booking_ref]:::biz
+    Find --> Ok{found?}:::dec
+    Ok -- no --> E404[BookingNotFoundError 404]:::bad
+    Ok -- yes --> State{status in<br/>cancelled / completed /<br/>no_show?}:::dec
+    State -- yes --> E409[InvalidBookingStateError 409]:::bad
+    State -- no --> When[hours_to_checkin =<br/>checkin (IST midnight) - now (IST)]:::biz
+    When --> Who{cancelled_by_lodge?}:::dec
+    Who -- yes --> FullL[refund = 49<br/>'Lodge cancelled — full refund']:::ok
+    Who -- no --> Window{hours &gt;= 24?}:::dec
+    Window -- yes --> FullD[refund = 49<br/>'24+ hours — full refund']:::ok
+    Window -- no --> Zero[refund = 0<br/>'within 24h — no refund']:::warn
+    FullL --> Apply
+    FullD --> Apply
+    Zero --> Apply
+    Apply[booking.status = cancelled<br/>booking.refund_amount = N<br/>availability.increment]:::biz
+    Apply --> R200([200 CancellationResponse<br/>refund_amount + reason]):::ok
+
+    classDef ok fill:#1f3d2b,stroke:#4ade80,color:#d7dde3
+    classDef warn fill:#4a3a14,stroke:#facc15,color:#d7dde3
+    classDef bad fill:#3d1f1f,stroke:#f87171,color:#d7dde3
+    classDef biz fill:#1b3a5c,stroke:#6cb6ff,color:#d7dde3
+    classDef dec fill:#2a333d,stroke:#8b96a3,color:#d7dde3
+    classDef edge fill:#1b232b,stroke:#8b96a3,color:#d7dde3
+</pre>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="lodge-search">
+  <h2>13. Lodge search with backups</h2>
+  <p><code>GET /lodges/search?checkin_date=…</code> — implements Method 3 from the design doc.</p>
+  <div class="chart">
+<pre class="mermaid">
+flowchart TD
+    A([GET /lodges/search]):::edge --> Q[SELECT lodges<br/>WHERE verified=true<br/>+ optional max_walk_minutes]:::biz
+    Q --> Loop[for each lodge<br/>(ordered by walk minutes)]:::biz
+    Loop --> Get[availability.get_availability<br/>read-only, no INSERT]:::biz
+    Get --> Rooms{rooms_available?}:::dec
+    Rooms -->|missing| Empty[treat as full<br/>rooms_available = 0]:::warn
+    Rooms -->|0| Full[treat as full]:::warn
+    Rooms -->|N| Free[rooms_available = N]:::ok
+    Free --> Price[price_for_date<br/>normal vs Pournami<br/>vs Karthigai]:::biz
+    Empty --> Price
+    Full --> Price
+    Price --> Filter{passes<br/>min/max price?}:::dec
+    Filter -- no --> Loop
+    Filter -- yes --> Bucket{is_full?}:::dec
+    Bucket -- no --> Primary{len primary &lt;<br/>limit_primary (3)?}:::dec
+    Primary -- yes --> PushP[append to primary]:::ok
+    Primary -- no --> Skip
+    Bucket -- yes --> Backup{len backups &lt;<br/>limit_backups (2)?}:::dec
+    Backup -- yes --> PushB[append to backups]:::warn
+    Backup -- no --> Skip
+    PushP --> More
+    PushB --> More
+    Skip[skip lodge] --> More
+    More{more lodges?}:::dec -- yes --> Loop
+    More -- no --> Ret([200<br/>primary + backups]):::ok
+
+    classDef ok fill:#1f3d2b,stroke:#4ade80,color:#d7dde3
+    classDef warn fill:#4a3a14,stroke:#facc15,color:#d7dde3
+    classDef biz fill:#1b3a5c,stroke:#6cb6ff,color:#d7dde3
+    classDef dec fill:#2a333d,stroke:#8b96a3,color:#d7dde3
+    classDef edge fill:#1b232b,stroke:#8b96a3,color:#d7dde3
+</pre>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="errors">
+  <h2>14. Error envelope flow</h2>
+  <p>Every exception ends up in the uniform <code>{"error": { code, message, request_id, details }}</code> shape via <code>app/exception_handlers.py</code>.</p>
+  <div class="chart">
+<pre class="mermaid">
+flowchart TD
+    R([route raises]):::edge
+    R --> Type{exception type}:::dec
+    Type -->|AppError| App[app_error_handler<br/>uses exc.status_code<br/>+ exc.code + exc.details]:::biz
+    Type -->|StarletteHTTPException| Http[http_exception_handler<br/>code = http_NNN]:::biz
+    Type -->|RequestValidationError| Val[validation_error_handler<br/>422 + per-field details]:::biz
+    Type -->|IntegrityError| Int[integrity_error_handler<br/>409 integrity_violation]:::biz
+    Type -->|other SQLAlchemyError| Sql[sqlalchemy_error_handler<br/>503 database_error<br/>stack trace logged]:::biz
+    Type -->|anything else| Un[unhandled_exception_handler<br/>500 internal_error<br/>stack trace logged]:::biz
+    App --> Env[JSON envelope]:::ok
+    Http --> Env
+    Val --> Env
+    Int --> Env
+    Sql --> Env
+    Un --> Env
+    Env --> Tag[middleware adds<br/>X-Request-ID header<br/>same id in error.request_id]:::biz
+    Tag --> Done([response to client]):::ok
+
+    classDef ok fill:#1f3d2b,stroke:#4ade80,color:#d7dde3
+    classDef biz fill:#1b3a5c,stroke:#6cb6ff,color:#d7dde3
+    classDef dec fill:#2a333d,stroke:#8b96a3,color:#d7dde3
+    classDef edge fill:#1b232b,stroke:#8b96a3,color:#d7dde3
+</pre>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="middleware">
+  <h2>15. Request middleware stack</h2>
+  <p>Every request passes through these in order. Applied in <code>app/main.py</code>.</p>
+  <div class="chart">
+<pre class="mermaid">
+flowchart LR
+    R([HTTP request]):::edge
+    R --> Cors[CORSMiddleware<br/>preflight, headers]:::biz
+    Cors --> Size[MaxBodySizeMiddleware<br/>413 if Content-Length > 1 MiB]:::biz
+    Size --> Ctx[RequestContextMiddleware<br/>generate or accept X-Request-ID<br/>logs METHOD PATH -> STATUS in Xms]:::biz
+    Ctx --> Route[FastAPI router]:::biz
+    Route --> Resp([response<br/>+ X-Request-ID header]):::ok
+
+    classDef ok fill:#1f3d2b,stroke:#4ade80,color:#d7dde3
+    classDef biz fill:#1b3a5c,stroke:#6cb6ff,color:#d7dde3
+    classDef edge fill:#1b232b,stroke:#8b96a3,color:#d7dde3
+</pre>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="http-codes">
+  <h2>16. HTTP status reference</h2>
+  <p>What returns each status, sourced from the actual handlers.</p>
+  <table>
+    <tr>
+      <th>Status</th><th>Where</th><th>When</th>
+    </tr>
+    <tr>
+      <td><span class="pill pill-ok">200</span></td>
+      <td>most GETs + system/health</td>
+      <td>Happy path.</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-ok">200</span></td>
+      <td><code>/webhook/whatsapp/twilio</code></td>
+      <td>Duplicate <code>MessageSid</code> — body has <code>duplicate: true</code>, no re-send.</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-ok">201</span></td>
+      <td>POSTs that create rows</td>
+      <td>New booking, lodge, devotee, crowd report.</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-warn">400</span></td>
+      <td><code>lodge_not_verified</code>, <code>validation_failed</code></td>
+      <td>Business rule rejects the request OR (Twilio route) inbound passes signature but phone fails Pydantic regex.</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-warn">403</span></td>
+      <td><code>/webhook/whatsapp/twilio</code></td>
+      <td>Signature missing, mismatch, empty token, malformed form, or required fields missing.</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-warn">404</span></td>
+      <td><code>*_not_found</code></td>
+      <td>Lodge, booking, devotee, config key, or availability row not in DB.</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-warn">409</span></td>
+      <td><code>no_rooms_available</code>, <code>invalid_booking_state</code>, <code>integrity_violation</code></td>
+      <td>Concurrency / state conflict.</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-warn">413</span></td>
+      <td><code>MaxBodySizeMiddleware</code></td>
+      <td>Content-Length above <code>MAX_REQUEST_BODY_BYTES</code> (default 1 MiB).</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-warn">422</span></td>
+      <td>Pydantic</td>
+      <td>Schema validation failed; <code>error.details.errors</code> lists each field.</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-bad">500</span></td>
+      <td>unhandled_exception_handler</td>
+      <td>Programmer error — stack trace logged with <code>rid</code>.</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-bad">503</span></td>
+      <td><code>/db-check</code>, <code>/webhook/whatsapp/twilio</code></td>
+      <td>DB unreachable OR <code>TWILIO_ENABLED=false</code>.</td>
+    </tr>
+  </table>
+</section>
+
+</main>
+</div>
+
+<footer>
+  Generated from a read of <code>app/</code> at 252 tests / 100% coverage.
+  Render with any modern browser — no build step.
+</footer>
+
+</body>
+</html>

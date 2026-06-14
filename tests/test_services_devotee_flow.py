@@ -70,6 +70,13 @@ def test_crowd_query_returns_status(db_session, seed_temple_config):
 
 
 def test_crowd_query_with_live_data(db_session, seed_temple_config):
+    # Widen the open window so this test is wall-clock independent.
+    from app.services import temple_config as cfg_svc
+
+    cfg_svc.upsert(db_session, "temple_open_time", "00:00")
+    cfg_svc.upsert(db_session, "temple_close_time", "23:59")
+    db_session.commit()
+
     devotee_flow.handle_incoming(db_session, _msg("Hi"))
     devotee_flow.handle_incoming(db_session, _msg("5"))
     db_session.commit()
@@ -158,6 +165,12 @@ def test_crowd_query_closed_returns_message(db_session, seed_temple_config, monk
 
 
 def test_crowd_query_includes_sold_out_labels(db_session, seed_temple_config):
+    from app.services import temple_config as cfg_svc
+
+    cfg_svc.upsert(db_session, "temple_open_time", "00:00")
+    cfg_svc.upsert(db_session, "temple_close_time", "23:59")
+    db_session.commit()
+
     devotee_flow.handle_incoming(db_session, _msg("Hi"))
     devotee_flow.handle_incoming(db_session, _msg("5"))
     db_session.commit()
