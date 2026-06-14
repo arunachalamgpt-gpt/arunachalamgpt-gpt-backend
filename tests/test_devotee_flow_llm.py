@@ -199,6 +199,60 @@ def test_change_language_via_llm(db_session, monkeypatch):
     assert r.text.startswith("[TR] ")
 
 
+def test_long_reply_truncated_before_translation(db_session, monkeypatch):
+    """Devotee_flow must truncate to WhatsApp limit BEFORE calling translator,
+    so we don't pay LLM cost on chars we'd discard.
+    """
+    from app.services import planning as planning_svc
+    from app.services import translator as translator_svc
+    from app.services import whatsapp as whatsapp_svc
+
+    captured_lengths = []
+
+    def _capturing_translate(text, lang):
+        captured_lengths.append(len(text))
+        return text  # don't actually translate in this test
+
+    monkeypatch.setattr(translator_svc, "translate", _capturing_translate)
+
+    # Make planning.recommend return a deliberately huge text
+    from app.schemas.devotee import PlanningRecommendationResponse
+
+    huge_rationale = "x" * 5000
+
+    def _big_plan(*args, **kwargs):
+        return PlanningRecommendationResponse(
+            visit_date=date.today(),
+            has_elderly=False,
+            has_children=False,
+            recommended_arrival="dawn",
+            recommended_line="Rs.50",
+            rationale=huge_rationale,
+            packing_checklist=[],
+        )
+
+    monkeypatch.setattr(planning_svc, "recommend", _big_plan)
+    _stub_intent(
+        monkeypatch,
+        {
+            "Hi": intent_svc.IntentResult(intent="unknown"),
+            "5": intent_svc.IntentResult(intent="unknown"),
+            "plan?": intent_svc.IntentResult(intent="ask_plan"),
+        },
+    )
+
+    devotee_flow.handle_incoming(db_session, _msg("Hi"))
+    devotee_flow.handle_incoming(db_session, _msg("5"))
+    db_session.commit()
+    captured_lengths.clear()
+    devotee_flow.handle_incoming(db_session, _msg("plan?"))
+
+    # The "5" turn calls translator (with the language-ack text); we cleared
+    # before "plan?", so the last entry is from the ask_plan path.
+    assert captured_lengths, "translator was never invoked"
+    assert captured_lengths[-1] <= whatsapp_svc.MAX_OUTBOUND_BODY
+
+
 def test_change_language_without_target_falls_through(
     db_session, monkeypatch, seed_temple_config
 ):

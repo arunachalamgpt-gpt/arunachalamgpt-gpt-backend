@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
+from app.auth import require_api_key
 from app.database import get_db
 from app.errors import NotFoundError
 from app.models.devotee import DevoteeProfile
@@ -36,9 +37,14 @@ class DevoteeNotFoundError(NotFoundError):
         "Idempotent — re-POSTing the same `phone` overwrites only the fields "
         "you include. Use this when the bot collects info up-front; the "
         "WhatsApp webhook path mutates the profile in-place as the user "
-        "progresses through the journey."
+        "progresses through the journey.\n\n"
+        "Requires `X-API-Key` when `API_KEY` is set in the environment."
     ),
-    responses={422: {"description": "Phone format invalid or past date supplied"}},
+    responses={
+        401: {"description": "Missing or invalid X-API-Key (when API_KEY is set)"},
+        422: {"description": "Phone format invalid or past date supplied"},
+    },
+    dependencies=[Depends(require_api_key)],
 )
 def upsert_profile(payload: DevoteeProfileIn, db: Session = Depends(get_db)):
     profile = db.get(DevoteeProfile, payload.phone)

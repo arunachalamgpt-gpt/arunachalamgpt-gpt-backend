@@ -282,6 +282,7 @@ All settings come from environment variables (loaded from `.env`).
 | `TWILIO_FROM_NUMBER` | *(unset)* | Sender phone in E.164 (`+14155238886` for the sandbox). |
 | `TWILIO_WEBHOOK_URL` | *(unset)* | The exact public URL Twilio is configured to call. Must match what's set in Twilio Console for signature verification to succeed. |
 | `TWILIO_TIMEOUT_SECONDS` | `8` | Per-request timeout for outbound Twilio API calls. |
+| `API_KEY` | *(unset)* | When set, the following routes require `X-API-Key: <value>` header: `POST /devotees`, `POST /crowd/reports`, `POST /crowd/reports/structured`, `POST /crowd/history`, `POST /webhook/whatsapp` (internal). Twilio's `/webhook/whatsapp/twilio` is already protected by HMAC signature and stays open. Leave unset in dev. |
 
 ## API map
 
@@ -454,6 +455,36 @@ and no network call is made.
 6. Restart, then text *"join &lt;keyword&gt;"* to the sandbox number from your
    own WhatsApp — Twilio relays it through `/webhook/whatsapp/twilio`.
 
+### Lunar calendar
+
+Pournami (full moon) and Karthigai Deepam dates drift ~10 days every
+Gregorian year because they follow the Tamil lunar calendar, so a static
+day-of-month check can't work. We ship a hand-curated table in
+[app/services/lunar_calendar.py](app/services/lunar_calendar.py) keyed by
+year (currently 2026 + 2027).
+
+`pricing.price_for_date(lodge, checkin_date)` consults the table:
+
+1. If the date is **Karthigai Deepam** AND the lodge has `price_karthigai` set
+   → use `price_karthigai`.
+2. Else if the date is a **Pournami** → use `price_pournami`.
+3. Else → `price_normal`.
+
+**Refresh procedure each November** (covered in the module docstring):
+
+1. Cross-check IST full-moon dates against drikpanchang.com and
+   timeanddate.com.
+2. Append a new `POURNAMI_DATES[year] = frozenset({...})` block.
+3. Add the Karthigai Deepam date to `KARTHIGAI_DEEPAM_DATES[year]`.
+4. Add one or two parametrised entries in
+   [tests/test_services_lunar_calendar.py](tests/test_services_lunar_calendar.py).
+   The existing tests will also catch typos (every date is asserted to be
+   keyed under the matching year, and consecutive full moons must be 27–32
+   days apart).
+
+For an unknown year, `is_pournami(d)` returns `False` — bookings fall back
+to the normal price rather than silently mis-charging.
+
 ## Robustness guarantees
 
 - **Anti-oversell.** `decrement`/`set_availability` take a `SELECT ... FOR UPDATE`
@@ -554,9 +585,6 @@ stable; clients should switch on it rather than the human-readable
 
 **Feature 6 — Verified Lodge Booking:**
 - Razorpay webhook handler for auto-payment-verification (Phase 2/3 of design)
-- Pournami / Karthigai date detection — the sets in `services/pricing.py` are
-  empty; wire to a lunar-calendar lookup so `price_pournami` / `price_karthigai`
-  actually trigger
 - Photo upload to Supabase Storage — `photo_urls` is a plain text array
 
 **Cross-cutting:**

@@ -59,3 +59,8 @@ TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
 TWILIO_WEBHOOK_URL = os.getenv("TWILIO_WEBHOOK_URL", "")
 TWILIO_TIMEOUT_SECONDS = float(os.getenv("TWILIO_TIMEOUT_SECONDS", "8"))
+
+# X-API-Key guard for write endpoints that aren't covered by the Twilio
+# signature check. When unset (default in dev/tests), the guard is a no-op
+# so existing tests + dev work without credentials. Set in any non-dev env.
+API_KEY = os.getenv("API_KEY", "")

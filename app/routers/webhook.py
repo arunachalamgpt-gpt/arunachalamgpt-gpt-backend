@@ -17,6 +17,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.auth import require_api_key
 from app.database import get_db
 from app.schemas.devotee import BotReply, IncomingWhatsAppMessage
 from app.services import devotee_flow, whatsapp
@@ -61,7 +62,11 @@ router = APIRouter(prefix="/webhook", tags=["webhook"])
         "the keyword path and replies in English. No outbound call is made "
         "to OpenAI when `OPENAI_ENABLED=false`."
     ),
-    responses={422: {"description": "Invalid phone or empty text"}},
+    responses={
+        401: {"description": "Missing or invalid X-API-Key (when API_KEY is set)"},
+        422: {"description": "Invalid phone or empty text"},
+    },
+    dependencies=[Depends(require_api_key)],
 )
 def incoming(msg: IncomingWhatsAppMessage, db: Session = Depends(get_db)):
     reply = devotee_flow.handle_incoming(db, msg)

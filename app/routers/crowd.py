@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import require_api_key
 from app.database import get_db
 from app.models.crowd import CrowdHistory
 from app.schemas.crowd import (
@@ -53,8 +54,10 @@ router = APIRouter(prefix="/crowd", tags=["crowd"])
     ),
     responses={
         400: {"description": "Unparseable text or invalid phone"},
+        401: {"description": "Missing or invalid X-API-Key (when API_KEY is set)"},
         422: {"description": "Validation failed on the request body"},
     },
+    dependencies=[Depends(require_api_key)],
 )
 def submit_raw(payload: VolunteerRawMessage, db: Session = Depends(get_db)):
     fields = crowd_svc.parse_volunteer_message(payload.text)
@@ -84,7 +87,11 @@ def submit_raw(payload: VolunteerRawMessage, db: Session = Depends(get_db)):
         "wait minutes and sold-out flags — useful for the admin dashboard "
         "and tests."
     ),
-    responses={422: {"description": "Validation failed on the request body"}},
+    responses={
+        401: {"description": "Missing or invalid X-API-Key (when API_KEY is set)"},
+        422: {"description": "Validation failed on the request body"},
+    },
+    dependencies=[Depends(require_api_key)],
 )
 def submit_structured(payload: CrowdReportIn, db: Session = Depends(get_db)):
     row = crowd_svc.record_status(db, payload)
@@ -149,7 +156,11 @@ def predict(
         "Stores the wait the devotee experienced. Aggregations of this table "
         "back the `/crowd/predict` endpoint."
     ),
-    responses={422: {"description": "Validation failed (e.g. hour_of_day out of range)"}},
+    responses={
+        401: {"description": "Missing or invalid X-API-Key (when API_KEY is set)"},
+        422: {"description": "Validation failed (e.g. hour_of_day out of range)"},
+    },
+    dependencies=[Depends(require_api_key)],
 )
 def add_history(payload: CrowdHistoryIn, db: Session = Depends(get_db)):
     row = prediction_svc.record_history(db, payload)

@@ -1,22 +1,20 @@
 """Lodge pricing logic.
 
-`price_for_date` chooses the right rate (normal vs Pournami vs Karthigai) for a
-given check-in date. Pournami/Karthigai day-of-month sets are placeholders until
-a lunar-calendar lookup is wired in.
+`price_for_date` picks the right rate for a given check-in date by consulting
+the curated lunar-calendar table in `app.services.lunar_calendar`. The
+priority is: Karthigai Deepam → Pournami → normal. Karthigai falls back to
+the normal price when the lodge hasn't set a Karthigai rate.
 """
 
 from datetime import date
 
 from app.models.lodge import Lodge
-
-POURNAMI_DAYS_OF_MONTH: set[int] = set()
-KARTHIGAI_DAYS_OF_MONTH: set[int] = set()
+from app.services import lunar_calendar
 
 
 def price_for_date(lodge: Lodge, checkin_date: date) -> int:
-    day = checkin_date.day
-    if day in KARTHIGAI_DAYS_OF_MONTH and lodge.price_karthigai:
+    if lunar_calendar.is_karthigai_deepam(checkin_date) and lodge.price_karthigai:
         return lodge.price_karthigai
-    if day in POURNAMI_DAYS_OF_MONTH:
+    if lunar_calendar.is_pournami(checkin_date):
         return lodge.price_pournami
     return lodge.price_normal
