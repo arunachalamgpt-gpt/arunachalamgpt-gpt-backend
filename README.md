@@ -3,14 +3,25 @@
 FastAPI service powering the ArunachalamGPT WhatsApp assistant for devotees
 travelling to Tiruvannamalai.
 
+> **Status:** 285 tests · 100% line coverage · 0 known CVEs.
+> Live integrations end-to-end-verified: Twilio WhatsApp bridge ✓,
+> OpenAI GPT-4o (intent classifier + reply translator) ✓,
+> lunar-calendar pricing ✓.
+
 - **Feature 1 — Crowd Alert and Visit Planning.** Live East-gate crowd
   status from hourly volunteer reports, historical-prediction fallback,
   multi-language devotee profiles, the 10-step user journey driven by the
-  WhatsApp webhook, planning advice for families with elderly or children,
-  admin commands for sold-out tickets and config tweaks.
+  WhatsApp webhook, GPT-4o-driven understanding of romanized Indic text
+  ("crowd enna ippo?", "hindi me bolo"), planning advice for families with
+  elderly or children, admin commands for sold-out tickets and config tweaks.
 - **Feature 6 — Verified Lodge Booking.** Devotees book personally-verified
   lodges near Arunachaleswarar Temple, pay a Rs.49 booking fee, and pay the
-  room rent at the lodge on arrival.
+  room rent at the lodge on arrival. Pricing automatically picks the right
+  rate on Pournami / Karthigai Deepam from a hand-curated lunar table.
+
+📊 **Visual reference:** every implemented flow is rendered in
+[docs/flows.html](docs/flows.html) — open in any browser, 16 sections, 15
+Mermaid diagrams.
 
 ## Stack
 
@@ -156,6 +167,49 @@ APP_RELOAD=true
 - Liveness → http://localhost:8080/health
 - DB + pool stats → http://localhost:8080/db-check
 
+### Verify the LLM-driven WhatsApp flow in 60 seconds
+
+After `python run.py` boots cleanly with `OPENAI_ENABLED=true` + a valid key
+in `.env`, fire a romanized-Tamil conversation at the internal webhook:
+
+```bash
+PHONE="91xxxxxxxxxx"
+
+# Turn 1: first contact (numeric fast-path → no LLM call)
+curl -s -X POST http://localhost:8080/webhook/whatsapp \
+  -H "Content-Type: application/json" \
+  -d "{\"phone\":\"$PHONE\",\"text\":\"Hi\"}"
+
+# Turn 2: romanized Tamil — LLM classifies select_language
+curl -s -X POST http://localhost:8080/webhook/whatsapp \
+  -H "Content-Type: application/json" \
+  -d "{\"phone\":\"$PHONE\",\"text\":\"naan tamil pesalaam\"}"
+
+# Turn 3: romanized Tamil → ask_crowd; reply translated to Tamil script
+curl -s -X POST http://localhost:8080/webhook/whatsapp \
+  -H "Content-Type: application/json" \
+  -d "{\"phone\":\"$PHONE\",\"text\":\"crowd enna ippo?\"}"
+
+# Turn 4: LLM-only language switch — keyword path CANNOT catch this
+curl -s -X POST http://localhost:8080/webhook/whatsapp \
+  -H "Content-Type: application/json" \
+  -d "{\"phone\":\"$PHONE\",\"text\":\"hindi me bolo\"}"
+
+# Turn 5: plan now arrives in Devanagari
+curl -s -X POST http://localhost:8080/webhook/whatsapp \
+  -H "Content-Type: application/json" \
+  -d "{\"phone\":\"$PHONE\",\"text\":\"plan?\"}"
+```
+
+Expected outcomes:
+1. menu in English (state: `new`)
+2. ack in Tamil script (state: `language_selected`, language: `tamil`)
+3. crowd snapshot in Tamil
+4. confirmation `"भाषा हिंदी में बदल गई।"` (language: `hindi`)
+5. recommendation in Devanagari with `Rs.50`, `8:00`, etc. preserved
+
+Each turn costs ~$0.0005. ~9 OpenAI calls total = ~$0.005.
+
 ## Postman collections
 
 Three ready-to-import collections live under `postman/`:
@@ -223,10 +277,11 @@ pytest
 ```
 
 The run enforces **100% line coverage** of `app/` (`--cov-fail-under=100`) — at
-last count **241 tests** covering models, schemas, services (parsers,
+last count **285 tests** covering models, schemas, services (parsers,
 fallback, state machine, refund rule, LLM wrapper, intent classifier,
-translator, Twilio signature verify + send), routers, middleware, handlers,
-the lifespan, and reflection of the OpenAPI schema. An HTML coverage report is
+translator, Twilio signature verify + send, lunar-calendar table integrity,
+API-key guard), routers, middleware, handlers, the lifespan, and reflection
+of the OpenAPI schema. An HTML coverage report is
 written to `htmlcov/`. Tests use an in-memory SQLite — production `psql` is
 never touched. The model layer stays Postgres-compatible because the
 `StringArray` type-decorator in [app/models/types.py](app/models/types.py)
@@ -588,7 +643,22 @@ stable; clients should switch on it rather than the human-readable
 - Photo upload to Supabase Storage — `photo_urls` is a plain text array
 
 **Cross-cutting:**
-- Authentication — every endpoint is open today; needs an API key, JWT, or
-  Cloudflare Access in front before going live
 - Rate limiting (`slowapi`) once the WhatsApp bot is firing
 - Structured JSON logs for a log aggregator — current format is human-readable
+- GitHub Actions CI running `pytest` + `pip-audit` on every PR
+- Render / Fly / Heroku deploy config — `render.yaml` etc.
+- WhatsApp `STOP` / opt-out handling for compliance with Meta rules
+- Lodge-owner inbound bridge — design says owners reply `AVAIL 5` via WhatsApp;
+  our `POST /lodges/{id}/availability` endpoint is there, but the Twilio
+  inbound for the owner number isn't routed to it yet
+- Twilio status-callback endpoint for delivery / read receipts
+- Persistent (Redis-backed) idempotency on `MessageSid` — current LRU is
+  per-process only
+- Real-Postgres integration tests (current suite runs on SQLite)
+
+**✅ Done in recent passes (was previously listed as missing):**
+- ~~WhatsApp bridge (Twilio)~~ — wired with HMAC verify, dedup, redaction, truncation
+- ~~OpenAI GPT-4o integration~~ — intent classifier + reply translator end-to-end
+- ~~Pournami / Karthigai date detection~~ — hand-curated lunar table, 2026 + 2027
+- ~~Authentication on open POSTs~~ — `API_KEY` env var + `X-API-Key` guard
+- ~~Truncate English text before translation~~ — caps LLM input at 1500 chars

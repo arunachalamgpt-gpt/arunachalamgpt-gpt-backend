@@ -11,6 +11,17 @@ os.environ["DB_CONNECTION_STRING"] = "sqlite:///:memory:"
 os.environ["APP_RELOAD"] = "false"
 os.environ["LOCAL_TZ_OFFSET_MINUTES"] = "330"
 
+# Tests assume integrations are OFF by default — pin so a developer's local
+# .env (with Twilio / OpenAI / API_KEY set) can't leak into the test suite.
+os.environ["TWILIO_ENABLED"] = "false"
+os.environ["TWILIO_ACCOUNT_SID"] = ""
+os.environ["TWILIO_AUTH_TOKEN"] = ""
+os.environ["TWILIO_FROM_NUMBER"] = ""
+os.environ["TWILIO_WEBHOOK_URL"] = ""
+os.environ["OPENAI_ENABLED"] = "false"
+os.environ["OPENAI_API_KEY"] = ""
+os.environ["API_KEY"] = ""
+
 from datetime import date, timedelta
 from uuid import uuid4
 
