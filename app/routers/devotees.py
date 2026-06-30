@@ -17,7 +17,7 @@ from app.schemas.devotee import (
     DevoteeProfileUpdate,
     PlanningRecommendationResponse,
 )
-from app.services import planning as planning_svc
+from app.services import lunar_calendar, planning as planning_svc
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/devotees", tags=["devotees"])
@@ -115,4 +115,6 @@ def get_plan(phone: str, db: Session = Depends(get_db)):
         visit_date=target,
         has_elderly=profile.has_elderly,
         has_children=profile.has_children,
+        is_pournami=lunar_calendar.is_pournami(target),
+        is_festival=lunar_calendar.is_karthigai_deepam(target),
     )

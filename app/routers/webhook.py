@@ -111,8 +111,8 @@ async def twilio_inbound(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Invalid Twilio request")
 
     # Idempotency: Twilio retries on 5xx/timeout — skip if we already handled
-    # this MessageSid. Returns 200 with `duplicate: true` so Twilio stops.
-    if whatsapp.is_duplicate_message(parsed.message_id):
+    # this MessageSid. DB-backed so multiple workers can't double-process.
+    if whatsapp.is_duplicate_message(db, parsed.message_id):
         logger.info(
             "Twilio retry ignored sid=%s to=%s",
             parsed.message_id,

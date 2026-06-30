@@ -152,3 +152,130 @@ def test_current_status_naive_now_assumed_local(db_session, seed_temple_config):
     naive = datetime.now().replace(hour=10, minute=0, tzinfo=None)
     result = crowd_svc.current_status(db_session, now=naive)
     assert result.freshness in {"live", "prediction_only"}
+
+
+# ---------- prediction-backed messages for stale / missing data ----------
+
+
+def _seed_history(db, *, hour, free=None, rs50=None, rs200=None,
+                  is_pournami=False, is_festival=False):
+    """Insert a CrowdHistory row so prediction.predict() has data."""
+    from app.models.crowd import CrowdHistory
+    from datetime import date as _d
+
+    db.add(
+        CrowdHistory(
+            visit_date=_d.today(),
+            hour_of_day=hour,
+            is_pournami=is_pournami,
+            is_festival=is_festival,
+            free_wait_min=free,
+            rs50_wait_min=rs50,
+            rs200_wait_min=rs200,
+            source="post_visit",
+        )
+    )
+    db.flush()
+
+
+def test_current_status_no_report_uses_prediction(db_session, seed_temple_config):
+    """When no volunteer report exists, message should carry actual numbers."""
+    midmorning = datetime.now(crowd_svc._local_tz()).replace(hour=10, minute=0)
+    _seed_history(db_session, hour=10, free=90, rs50=20, rs200=5)
+    db_session.commit()
+    result = crowd_svc.current_status(db_session, now=midmorning)
+    assert result.freshness == "prediction_only"
+    assert result.free_wait_min == 90
+    assert result.rs50_wait_min == 20
+    assert result.rs200_wait_min == 5
+    assert "Based on past visits" in result.message
+    assert "n=1" in result.message
+
+
+def test_current_status_stale_over_6h_uses_prediction(
+    db_session, seed_temple_config
+):
+    midmorning = datetime.now(crowd_svc._local_tz()).replace(hour=15, minute=0)
+    _push_status(
+        db_session, base_now=midmorning, age_minutes=420,
+        free_wait_min=80, rs50_wait_min=15, rs200_wait_min=5,
+    )
+    _seed_history(db_session, hour=15, free=70, rs50=18, rs200=6)
+    db_session.commit()
+    result = crowd_svc.current_status(db_session, now=midmorning)
+    assert result.freshness == "prediction_only"
+    assert result.free_wait_min == 70
+    assert "7h old" in result.message  # 420 // 60
+    assert "Based on past visits" in result.message
+
+
+def test_current_status_no_history_falls_back_to_honest_message(
+    db_session, seed_temple_config
+):
+    """If neither volunteer data nor history exists, we don't fabricate."""
+    midmorning = datetime.now(crowd_svc._local_tz()).replace(hour=10, minute=0)
+    result = crowd_svc.current_status(db_session, now=midmorning)
+    assert result.free_wait_min is None
+    assert "check back" in result.message.lower()
+
+
+def test_current_status_stale_no_history_says_so_honestly(
+    db_session, seed_temple_config
+):
+    midmorning = datetime.now(crowd_svc._local_tz()).replace(hour=15, minute=0)
+    _push_status(
+        db_session, base_now=midmorning, age_minutes=420,
+        free_wait_min=80, rs50_wait_min=15, rs200_wait_min=5,
+    )
+    db_session.commit()
+    result = crowd_svc.current_status(db_session, now=midmorning)
+    assert result.freshness == "prediction_only"
+    assert "7h old" in result.message
+    assert "not yet have enough" in result.message.lower() or \
+        "ask a volunteer" in result.message.lower()
+
+
+def test_current_status_pournami_message_when_in_lunar_table(
+    db_session, seed_temple_config, monkeypatch
+):
+    """When today is a Pournami, the message should call it out."""
+    from app.services import lunar_calendar
+    monkeypatch.setattr(lunar_calendar, "is_pournami", lambda d: True)
+    monkeypatch.setattr(lunar_calendar, "is_karthigai_deepam", lambda d: False)
+
+    midmorning = datetime.now(crowd_svc._local_tz()).replace(hour=10, minute=0)
+    _seed_history(db_session, hour=10, free=150, is_pournami=True)
+    db_session.commit()
+    result = crowd_svc.current_status(db_session, now=midmorning)
+    assert "Pournami" in result.message
+    assert result.free_wait_min == 150
+
+
+def test_current_status_festival_message(
+    db_session, seed_temple_config, monkeypatch
+):
+    """Karthigai Deepam day should be called out explicitly."""
+    from app.services import lunar_calendar
+    monkeypatch.setattr(lunar_calendar, "is_pournami", lambda d: False)
+    monkeypatch.setattr(lunar_calendar, "is_karthigai_deepam", lambda d: True)
+
+    midmorning = datetime.now(crowd_svc._local_tz()).replace(hour=10, minute=0)
+    _seed_history(db_session, hour=10, free=200, is_festival=True)
+    db_session.commit()
+    result = crowd_svc.current_status(db_session, now=midmorning)
+    assert "Karthigai Deepam" in result.message
+    assert result.free_wait_min == 200
+
+
+def test_current_status_history_with_all_none_falls_to_honest_message(
+    db_session, seed_temple_config
+):
+    """Edge case: history rows exist but every wait-min is None (e.g. SOLD
+    across the board). We must NOT promise "here's an estimate" then show
+    blank numbers — fall back to the honest message."""
+    midmorning = datetime.now(crowd_svc._local_tz()).replace(hour=10, minute=0)
+    _seed_history(db_session, hour=10, free=None, rs50=None, rs200=None)
+    db_session.commit()
+    result = crowd_svc.current_status(db_session, now=midmorning)
+    assert result.free_wait_min is None
+    assert "check back" in result.message.lower()

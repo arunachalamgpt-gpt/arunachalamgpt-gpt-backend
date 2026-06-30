@@ -27,6 +27,8 @@ VALID_INTENTS = {
     "ask_crowd",
     "ask_plan",
     "change_language",
+    "general_question",
+    "ask_smalltalk",
     "unknown",
 }
 
@@ -66,6 +68,17 @@ slots: {}.
 
 - "change_language" — user asks to switch language. slots: {"target_language": \
 "tamil"|"telugu"|"kannada"|"hindi"|"english"}.
+
+- "general_question" — user asks a factual question about Arunachaleswarar \
+Temple, Lord Shiva (Annamalaiyar), the goddess Unnamulai, the Arunachala \
+hill, Girivalam, temple festivals (Karthigai Deepam, Pournami), temple \
+history, location, opening times, how to reach. Also use for non-temple \
+small questions the user wants help with — let the QA layer decline. \
+slots: {"question": "<the user's question, cleaned up to standard English>"}.
+
+- "ask_smalltalk" — greetings, thanks, well-being check, off-topic chit-chat, \
+e.g. "how are you", "thanks", "good morning", "hello", "kya kar rahe ho", \
+"nandri", "nice", "ok", "bye". slots: {}.
 
 - "unknown" — none of the above. slots: {}.
 
@@ -112,5 +125,13 @@ def classify(text: str) -> IntentResult:
             clean_slots["target_language"] = target
         else:
             return IntentResult(intent="unknown")
+    elif intent == "general_question":
+        question = raw_slots.get("question")
+        if isinstance(question, str) and question.strip():
+            clean_slots["question"] = question.strip()
+        else:
+            # No question slot → fall back: still treat as general question with
+            # the raw text so downstream can ask the QA layer.
+            clean_slots["question"] = text.strip()
 
     return IntentResult(intent=intent, slots=clean_slots)

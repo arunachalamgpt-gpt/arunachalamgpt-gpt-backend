@@ -32,3 +32,9 @@ class DevoteeProfile(SQLModel, table=True):
     onboarding_state: str = Field(default="new", max_length=24)
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
+    # Loop-detection: hash of the last English reply we sent + how many times
+    # in a row we've sent it. Lets us vary the response when a user keeps
+    # asking the same thing instead of mechanically repeating ourselves.
+    last_reply_hash: Optional[str] = Field(default=None, max_length=64)
+    last_reply_at: Optional[datetime] = None
+    repeat_count: int = Field(default=0)

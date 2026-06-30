@@ -25,3 +25,26 @@ def test_recommend_no_special_needs_mid_morning_rs50():
     )
     assert "Rs.50" in r.recommended_line
     assert "8:00 AM" in r.recommended_arrival
+
+
+def test_recommend_pournami_warns_and_recommends_early():
+    r = planning.recommend(
+        visit_date=date.today(),
+        has_elderly=False,
+        has_children=False,
+        is_pournami=True,
+    )
+    assert "Pournami" in r.rationale
+    assert "4:30" in r.recommended_arrival  # Pournami treated as heavy day
+
+
+def test_recommend_festival_warns_and_recommends_early():
+    r = planning.recommend(
+        visit_date=date.today(),
+        has_elderly=False,
+        has_children=False,
+        is_festival=True,
+    )
+    assert "Karthigai Deepam" in r.rationale
+    assert "4:30" in r.recommended_arrival
+

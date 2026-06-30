@@ -281,31 +281,66 @@ def test_redact_phone_short_inputs():
 # ---------- idempotency LRU ----------
 
 
-def test_is_duplicate_message_returns_false_for_none():
-    assert whatsapp.is_duplicate_message(None) is False
-    assert whatsapp.is_duplicate_message("") is False
+def test_is_duplicate_message_returns_false_for_none(db_session):
+    assert whatsapp.is_duplicate_message(db_session, None) is False
+    assert whatsapp.is_duplicate_message(db_session, "") is False
 
 
-def test_is_duplicate_message_dedups_repeats():
-    whatsapp._reset_seen_for_tests()
-    assert whatsapp.is_duplicate_message("SM1") is False
-    assert whatsapp.is_duplicate_message("SM1") is True
-    assert whatsapp.is_duplicate_message("SM2") is False
-    whatsapp._reset_seen_for_tests()
+def test_is_duplicate_message_dedups_repeats(db_session):
+    assert whatsapp.is_duplicate_message(db_session, "SM1") is False
+    db_session.commit()
+    assert whatsapp.is_duplicate_message(db_session, "SM1") is True
+    assert whatsapp.is_duplicate_message(db_session, "SM2") is False
 
 
-def test_is_duplicate_message_evicts_oldest_at_capacity(monkeypatch):
-    """Check eviction by inspecting the cache directly — calling
-    `is_duplicate_message` would re-add and shift the LRU window.
+def test_purge_old_processed_messages_deletes_only_stale_rows(db_session):
+    from datetime import datetime, timedelta
+    from app.models.processed_message import ProcessedMessage
+
+    # Two old rows + one fresh row
+    db_session.add(ProcessedMessage(
+        message_id="SMold1", source="twilio",
+        first_seen_at=datetime.utcnow() - timedelta(days=10),
+    ))
+    db_session.add(ProcessedMessage(
+        message_id="SMold2", source="twilio",
+        first_seen_at=datetime.utcnow() - timedelta(hours=72),
+    ))
+    db_session.add(ProcessedMessage(
+        message_id="SMfresh", source="twilio",
+        first_seen_at=datetime.utcnow() - timedelta(hours=1),
+    ))
+    db_session.commit()
+
+    n = whatsapp.purge_old_processed_messages(db_session, older_than_hours=48)
+    db_session.commit()
+    assert n == 2
+    assert db_session.get(ProcessedMessage, "SMold1") is None
+    assert db_session.get(ProcessedMessage, "SMold2") is None
+    assert db_session.get(ProcessedMessage, "SMfresh") is not None
+
+
+def test_purge_old_processed_messages_empty_table(db_session):
+    n = whatsapp.purge_old_processed_messages(db_session)
+    assert n == 0
+
+
+def test_is_duplicate_message_handles_concurrent_insert(db_session, monkeypatch):
+    """If another worker beat us to the INSERT between our SELECT and INSERT,
+    the unique constraint trips IntegrityError. We treat that as "duplicate".
     """
-    whatsapp._reset_seen_for_tests()
-    monkeypatch.setattr(whatsapp, "_SEEN_CAP", 3)
-    for sid in ("A", "B", "C", "D"):
-        whatsapp.is_duplicate_message(sid)
-    assert "A" not in whatsapp._seen_message_ids  # evicted
-    assert "B" in whatsapp._seen_message_ids
-    assert "D" in whatsapp._seen_message_ids
-    whatsapp._reset_seen_for_tests()
+    from sqlalchemy.exc import IntegrityError
+
+    # Force the "not seen yet" branch even though we'll make INSERT fail —
+    # this simulates the race window where SELECT saw nothing but another
+    # worker inserted the same id before our INSERT reached the DB.
+    monkeypatch.setattr(db_session, "get", lambda *a, **kw: None)
+
+    def _raise():
+        raise IntegrityError("stmt", {}, Exception("dup"))
+
+    monkeypatch.setattr(db_session, "flush", _raise)
+    assert whatsapp.is_duplicate_message(db_session, "SMconcurrent") is True
 
 
 # ---------- outbound truncation ----------

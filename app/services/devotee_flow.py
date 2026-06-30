@@ -22,11 +22,15 @@ Dispatch order on every turn (post-language-select):
 Reminders (D-2 / D-1 / D-0) are scheduler-owned and outside this module.
 """
 
+import hashlib
 import logging
 import re
 from datetime import date as date_t
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+import dateparser
+from dateparser.search import search_dates
 
 from sqlalchemy.orm import Session
 
@@ -34,7 +38,9 @@ from app.models.devotee import DevoteeProfile
 from app.schemas.devotee import BotReply, IncomingWhatsAppMessage
 from app.services import crowd as crowd_svc
 from app.services import intent as intent_svc
+from app.services import lunar_calendar
 from app.services import planning as planning_svc
+from app.services import temple_qa as qa_svc
 from app.services import translator as translator_svc
 from app.services import whatsapp as whatsapp_svc
 
@@ -58,6 +64,33 @@ _DATE_PATTERNS = [
     re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b"),  # 15/06/2026
 ]
 
+# Only invoke dateparser when text contains an explicit English date trigger.
+# Without this gate, dateparser hallucinates dates out of innocuous tokens
+# ("now", weekday-like words in other languages), breaking the keyword
+# fallback for crowd/language/smalltalk queries.
+_DATE_TRIGGER_RE = re.compile(
+    r"\b(today|tomorrow|tmrw|tonight|yesterday|next|this|coming|after|"
+    r"mon(day)?|tue(s|sday)?|wed(nesday)?|thu(r|rs|rsday)?|fri(day)?|"
+    r"sat(urday)?|sun(day)?|"
+    r"jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|jun(e)?|jul(y)?|"
+    r"aug(ust)?|sep(t|tember)?|oct(ober)?|nov(ember)?|dec(ember)?|"
+    r"weekend|in\s+\d+\s+(day|days|week|weeks|month|months))\b",
+    re.IGNORECASE,
+)
+
+# Keyword shortcuts that bypass the LLM — typed across most languages.
+RESET_KEYWORDS = {"/reset", "reset", "restart", "start over", "/start"}
+MENU_KEYWORDS = {"/menu", "menu", "/help", "help", "options"}
+HELP_BODY = (
+    "I can help with:\n"
+    "• 'crowd' — live East-gate queue\n"
+    "• 'plan' — best arrival time + checklist\n"
+    "• send a date YYYY-MM-DD to register a visit\n"
+    "• 'change to <language>' — Tamil/Telugu/Kannada/Hindi/English\n"
+    "• ask anything about the temple\n"
+    "• '/reset' — start over"
+)
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -73,6 +106,7 @@ def _get_or_create_profile(db: Session, phone: str) -> DevoteeProfile:
 
 
 def _parse_date(text: str) -> Optional[date_t]:
+    # Fast path — explicit YYYY-MM-DD or DD/MM/YYYY anywhere in the text.
     for pattern in _DATE_PATTERNS:
         m = pattern.search(text)
         if not m:
@@ -86,7 +120,34 @@ def _parse_date(text: str) -> Optional[date_t]:
             return date_t(y, mth, d)
         except ValueError:
             continue
-    return None
+    # Natural-language fallback — "next Friday", "tomorrow", "in 2 weeks",
+    # "15th June", etc. Only fire when the text contains an explicit English
+    # date-trigger word; otherwise dateparser hallucinates dates out of words
+    # like "now", "ippo", or stray weekday tokens. Only accept FUTURE dates.
+    if not _DATE_TRIGGER_RE.search(text):
+        return None
+    settings = {
+        "PREFER_DATES_FROM": "future",
+        "RETURN_AS_TIMEZONE_AWARE": False,
+    }
+    parsed = None
+    try:
+        matches = search_dates(text, settings=settings)
+    except Exception:
+        matches = None
+    if matches:
+        parsed = matches[0][1]
+    else:
+        try:
+            parsed = dateparser.parse(text, settings=settings)
+        except Exception:
+            return None
+    if parsed is None:
+        return None
+    candidate = parsed.date()
+    if candidate < date_t.today():
+        return None
+    return candidate
 
 
 def _detect_elderly_children(text: str) -> tuple[bool, bool]:
@@ -167,6 +228,8 @@ def _dispatch_intent(
             visit_date=target,
             has_elderly=profile.has_elderly,
             has_children=profile.has_children,
+            is_pournami=lunar_calendar.is_pournami(target),
+            is_festival=lunar_calendar.is_karthigai_deepam(target),
         )
         return BotReply(
             phone=phone,
@@ -190,6 +253,49 @@ def _dispatch_intent(
                 language=target,  # type: ignore[arg-type]
                 state=profile.onboarding_state,  # type: ignore[arg-type]
             )
+
+    if result.intent == "general_question":
+        question = result.slots.get("question", "").strip()
+        if not question:
+            return None
+        answer = qa_svc.answer(question)
+        if answer is None:
+            # LLM confidently classified this as a factual question, but the
+            # QA service is unavailable. Don't fall through to date parsing —
+            # that would silently turn "tell me history" into a visit-date.
+            return BotReply(
+                phone=phone,
+                text=(
+                    "I couldn't fetch an answer right now. Please try again "
+                    "in a moment, or send 'menu' to see what I can help with."
+                ),
+                language=profile.language,  # type: ignore[arg-type]
+                state=profile.onboarding_state,  # type: ignore[arg-type]
+                metadata={"qa": False},
+            )
+        return BotReply(
+            phone=phone,
+            text=answer,
+            language=profile.language,  # type: ignore[arg-type]
+            state=profile.onboarding_state,  # type: ignore[arg-type]
+            metadata={"qa": True},
+        )
+
+    if result.intent == "ask_smalltalk":
+        name = (profile.name or "").strip()
+        greeting = f"🙏 Hello {name}!" if name else "🙏 Hello!"
+        return BotReply(
+            phone=phone,
+            text=(
+                f"{greeting} I'm ArunachalamGPT — I can help with the East-gate "
+                "crowd ('crowd'), planning your visit ('plan'), registering a "
+                "visit date (YYYY-MM-DD), or temple questions. What would you "
+                "like to know?"
+            ),
+            language=profile.language,  # type: ignore[arg-type]
+            state=profile.onboarding_state,  # type: ignore[arg-type]
+            metadata={"smalltalk": True},
+        )
 
     return None
 
@@ -241,6 +347,8 @@ def _dispatch_keywords(
             visit_date=target,
             has_elderly=profile.has_elderly,
             has_children=profile.has_children,
+            is_pournami=lunar_calendar.is_pournami(target),
+            is_festival=lunar_calendar.is_karthigai_deepam(target),
         )
         return BotReply(
             phone=phone,
@@ -283,6 +391,36 @@ def _dispatch_keywords(
 def handle_incoming(db: Session, msg: IncomingWhatsAppMessage) -> BotReply:
     profile = _get_or_create_profile(db, msg.phone)
     text = msg.text.strip()
+    lower = text.lower()
+
+    # Keyword shortcuts that always run first — no LLM cost.
+    if lower in RESET_KEYWORDS:
+        profile.language = None
+        profile.onboarding_state = "new"
+        # Clear loop-detection state too — the user explicitly asked to start
+        # over, so previous repeats are no longer relevant.
+        profile.last_reply_hash = None
+        profile.last_reply_at = None
+        profile.repeat_count = 0
+        profile.updated_at = _now()
+        db.flush()
+        return BotReply(
+            phone=msg.phone,
+            text=LANGUAGE_MENU,
+            state=profile.onboarding_state,
+        )
+
+    if lower in MENU_KEYWORDS:
+        # Translate so non-English users get a help message they can read.
+        help_text = whatsapp_svc.truncate_for_whatsapp(HELP_BODY)
+        if profile.language:
+            help_text = translator_svc.translate(help_text, profile.language)
+        return BotReply(
+            phone=msg.phone,
+            text=help_text,
+            language=profile.language,  # type: ignore[arg-type]
+            state=profile.onboarding_state,
+        )
 
     # Step 2: Language selection.
     # Fast path: direct numeric match — no LLM call needed for "1".."5".
@@ -305,8 +443,10 @@ def handle_incoming(db: Session, msg: IncomingWhatsAppMessage) -> BotReply:
         profile.onboarding_state = "language_selected"
         profile.updated_at = _now()
         db.flush()
+        name = (profile.name or "").strip()
+        intro = f"Got it{', ' + name if name else ''} — "
         reply_text = (
-            f"Got it — replies will be in {LANGUAGE_NAMES[picked]}. "
+            f"{intro}replies will be in {LANGUAGE_NAMES[picked]}. "
             "Ask me about crowd, tickets or timings any time. "
             "When you're ready, share your visit date (YYYY-MM-DD)."
         )
@@ -325,8 +465,63 @@ def handle_incoming(db: Session, msg: IncomingWhatsAppMessage) -> BotReply:
     if reply is None:
         reply = _dispatch_keywords(db, profile, msg.phone, text)
 
+    # Loop-break: if this English reply matches the previous one we sent
+    # within a few minutes, the user is repeating themselves and we'd
+    # otherwise mechanically repeat ourselves. Vary the response.
+    reply.text = _maybe_break_repeat_loop(profile, reply.text)
+
     db.flush()
     # Cap the English text first → cheaper LLM call, predictable max body.
     reply.text = whatsapp_svc.truncate_for_whatsapp(reply.text)
     reply.text = translator_svc.translate(reply.text, profile.language)
     return reply
+
+
+# ---------- repeat-loop detection ----------
+
+_REPEAT_WINDOW = timedelta(minutes=10)
+
+
+def _hash_reply(text: str) -> str:
+    return hashlib.sha1(text.strip().encode("utf-8")).hexdigest()
+
+
+def _maybe_break_repeat_loop(profile: DevoteeProfile, reply_text: str) -> str:
+    """If the reply we're about to send matches the previous one, vary it.
+
+    Updates `last_reply_hash`, `last_reply_at`, `repeat_count` on the profile.
+    The new prefixes acknowledge the loop AND nudge the user toward `/menu`
+    so they don't feel stuck.
+    """
+    now = _now()
+    new_hash = _hash_reply(reply_text)
+    last_at = profile.last_reply_at
+    if last_at is not None and last_at.tzinfo is None:
+        last_at = last_at.replace(tzinfo=timezone.utc)
+
+    within_window = last_at is not None and (now - last_at) <= _REPEAT_WINDOW
+    if profile.last_reply_hash == new_hash and within_window:
+        profile.repeat_count = (profile.repeat_count or 0) + 1
+    else:
+        profile.repeat_count = 0
+    profile.last_reply_hash = new_hash
+    profile.last_reply_at = now
+
+    if profile.repeat_count == 0:
+        return reply_text
+    prefix, suffix = (
+        ("Got the same question again — here's what I have:\n\n",
+         "\n\nSend 'menu' for other things I can help with.")
+        if profile.repeat_count == 1
+        else (
+            "Looks like we're going in circles. I'm a bot, so I can only give "
+            "the same answer until something changes:\n\n",
+            "\n\nTry 'menu' to see options, or 'reset' to start fresh.",
+        )
+    )
+    # Keep the inner reply short enough that prefix + body + suffix still
+    # fits inside the WhatsApp body limit, so the helpful hint never gets
+    # truncated off the end.
+    budget = whatsapp_svc.MAX_OUTBOUND_BODY - len(prefix) - len(suffix)
+    inner = reply_text if len(reply_text) <= budget else reply_text[: budget - 1] + "…"
+    return f"{prefix}{inner}{suffix}"

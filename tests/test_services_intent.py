@@ -107,3 +107,31 @@ def test_classify_handles_slots_not_a_dict(monkeypatch):
     r = intent_svc.classify("crowd?")
     assert r.intent == "ask_crowd"
     assert r.slots == {}
+
+
+def test_classify_general_question_with_explicit_slot(monkeypatch):
+    _stub_llm(
+        monkeypatch,
+        {
+            "intent": "general_question",
+            "slots": {"question": "Which deity is here?"},
+        },
+    )
+    r = intent_svc.classify("which god?")
+    assert r.intent == "general_question"
+    assert r.slots["question"] == "Which deity is here?"
+
+
+def test_classify_general_question_falls_back_to_raw_text(monkeypatch):
+    """When LLM picks general_question but forgets the question slot, we use
+    the raw user text as the question so the QA layer still has something."""
+    _stub_llm(monkeypatch, {"intent": "general_question", "slots": {}})
+    r = intent_svc.classify("tell me history")
+    assert r.intent == "general_question"
+    assert r.slots["question"] == "tell me history"
+
+
+def test_classify_ask_smalltalk(monkeypatch):
+    _stub_llm(monkeypatch, {"intent": "ask_smalltalk", "slots": {}})
+    r = intent_svc.classify("how are you?")
+    assert r.intent == "ask_smalltalk"

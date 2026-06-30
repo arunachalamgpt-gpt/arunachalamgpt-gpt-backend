@@ -19,9 +19,14 @@ from app.schemas.devotee import PlanningRecommendationResponse
 
 
 def recommend(
-    *, visit_date: date_t, has_elderly: bool, has_children: bool
+    *,
+    visit_date: date_t,
+    has_elderly: bool,
+    has_children: bool,
+    is_pournami: bool = False,
+    is_festival: bool = False,
 ) -> PlanningRecommendationResponse:
-    needs_early = has_elderly or has_children
+    needs_early = has_elderly or has_children or is_festival or is_pournami
     if needs_early:
         arrival = "4:30 AM (before the sunrise rush)"
         line = "Rs.200 ticket — shortest queue (15-25 minutes)"
@@ -35,6 +40,16 @@ def recommend(
         rationale = (
             "No elderly or children — a mid-morning arrival with the Rs.50 ticket "
             "balances cost and queue length."
+        )
+    if is_festival:
+        rationale = (
+            "Karthigai Deepam — expect very heavy crowds. " + rationale +
+            " Carry water and avoid the hottest part of the day."
+        )
+    elif is_pournami:
+        rationale = (
+            "Pournami (full-moon) Girivalam day — crowds are heavier than usual. " +
+            rationale
         )
 
     checklist = ["Water bottle (1 litre per person)", "Comfortable walking footwear"]

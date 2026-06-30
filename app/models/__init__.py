@@ -8,6 +8,7 @@ build the schema.
 from app.models.crowd import CrowdHistory, CrowdStatus
 from app.models.devotee import DevoteeProfile
 from app.models.lodge import Lodge, LodgeAvailability, LodgeBooking
+from app.models.processed_message import ProcessedMessage
 from app.models.temple_config import TempleConfig
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "Lodge",
     "LodgeAvailability",
     "LodgeBooking",
+    "ProcessedMessage",
     "TempleConfig",
 ]

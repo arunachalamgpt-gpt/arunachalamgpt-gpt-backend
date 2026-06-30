@@ -26,13 +26,13 @@ import base64
 import hashlib
 import hmac
 import logging
-import threading
-from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Optional
 
 import httpx
 from fastapi import Request
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.config import (
     TWILIO_ACCOUNT_SID,
@@ -42,19 +42,12 @@ from app.config import (
     TWILIO_TIMEOUT_SECONDS,
     TWILIO_WEBHOOK_URL,
 )
+from app.models.processed_message import ProcessedMessage
 
 logger = logging.getLogger(__name__)
 
 # WhatsApp/Twilio rejects bodies > 1600 chars. Keep margin for safety.
 MAX_OUTBOUND_BODY = 1500
-
-# In-process LRU for Twilio MessageSid dedup. Twilio retries on 5xx/timeout
-# within minutes; this stops us from re-running the state machine for a
-# message we already processed. Per-process only — use Redis for multi-worker
-# deployments.
-_SEEN_CAP = 2048
-_seen_message_ids: "OrderedDict[str, None]" = OrderedDict()
-_seen_lock = threading.Lock()
 
 
 @dataclass
@@ -81,23 +74,47 @@ def redact_phone(phone: Optional[str]) -> str:
     return cleaned[:2] + "*" * (len(cleaned) - 4) + cleaned[-2:]
 
 
-def is_duplicate_message(message_id: Optional[str]) -> bool:
-    """Idempotent guard against Twilio retries. Returns True if already seen."""
+def is_duplicate_message(db: Session, message_id: Optional[str]) -> bool:
+    """Idempotent guard against Twilio retries — DB-backed.
+
+    INSERT-and-catch: the unique constraint on `message_id` lets multiple
+    concurrent workers safely race; the loser sees `IntegrityError` and
+    returns True (the work is already being done elsewhere).
+    """
     if not message_id:
         return False
-    with _seen_lock:
-        if message_id in _seen_message_ids:
-            _seen_message_ids.move_to_end(message_id)
-            return True
-        _seen_message_ids[message_id] = None
-        if len(_seen_message_ids) > _SEEN_CAP:
-            _seen_message_ids.popitem(last=False)
-        return False
+    existing = db.get(ProcessedMessage, message_id)
+    if existing is not None:
+        return True
+    db.add(ProcessedMessage(message_id=message_id, source="twilio"))
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        return True
+    return False
 
 
-def _reset_seen_for_tests() -> None:
-    with _seen_lock:
-        _seen_message_ids.clear()
+def purge_old_processed_messages(db: Session, *, older_than_hours: int = 48) -> int:
+    """Delete `processed_messages` rows whose `first_seen_at` is older than the
+    cutoff. Twilio only retries within minutes, so 48h is generous head-room.
+
+    Intended to be called from a cron/admin endpoint, NOT on the request path.
+    Returns the number of rows deleted.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=older_than_hours)
+    # Compare as naive UTC since the column is stored naive in SQLite tests
+    # and the production Postgres column is `timestamp without time zone` too.
+    cutoff_naive = cutoff.replace(tzinfo=None)
+    result = db.execute(
+        ProcessedMessage.__table__.delete().where(
+            ProcessedMessage.first_seen_at < cutoff_naive
+        )
+    )
+    db.flush()
+    return result.rowcount or 0
 
 
 def truncate_for_whatsapp(text: str) -> str:

@@ -107,7 +107,6 @@ def test_twilio_route_dedups_repeat_message_sid(client, monkeypatch):
     return immediately without re-running the state machine or sending again.
     """
     _force_enabled(monkeypatch)
-    whatsapp._reset_seen_for_tests()
     url = "http://testserver/webhook/whatsapp/twilio"
     form = {"From": "whatsapp:+919876543210", "Body": "Hi", "MessageSid": "SMretry"}
     sig = _twilio_sig(url, form)
@@ -141,7 +140,6 @@ def test_twilio_route_dedups_repeat_message_sid(client, monkeypatch):
     assert second.status_code == 200
     assert second.json().get("duplicate") is True
     assert send_calls["count"] == 1  # second call did NOT re-send
-    whatsapp._reset_seen_for_tests()
 
 
 def test_twilio_route_continues_when_send_fails(client, monkeypatch):

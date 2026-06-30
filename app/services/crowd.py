@@ -30,8 +30,8 @@ from sqlalchemy.orm import Session
 from app.config import LOCAL_TZ_OFFSET_MINUTES
 from app.errors import ValidationFailedError
 from app.models.crowd import CrowdStatus
-from app.schemas.crowd import CrowdCurrentResponse, CrowdReportIn
-from app.services import temple_config
+from app.schemas.crowd import CrowdCurrentResponse, CrowdPredictionResponse, CrowdReportIn
+from app.services import lunar_calendar, prediction, temple_config
 
 
 @dataclass
@@ -149,6 +149,71 @@ def latest_status(db: Session) -> Optional[CrowdStatus]:
     ).scalar_one_or_none()
 
 
+def _predict_now(db: Session, now_local: datetime) -> CrowdPredictionResponse:
+    """Run a prediction for the current hour-of-day, with festival/pournami
+    flags from the lunar calendar table. Safe — returns NULLs if no history.
+    """
+    today = now_local.date()
+    try:
+        return prediction.predict(
+            db,
+            visit_date=today,
+            hour_of_day=now_local.hour,
+            is_pournami=lunar_calendar.is_pournami(today),
+            is_festival=lunar_calendar.is_karthigai_deepam(today),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Prediction failed: %s", exc)
+        return CrowdPredictionResponse(
+            visit_date=today,
+            hour_of_day=now_local.hour,
+            is_pournami=False,
+            is_festival=False,
+            sample_size=0,
+            free_wait_min=None,
+            rs50_wait_min=None,
+            rs200_wait_min=None,
+        )
+
+
+def _prediction_message(
+    pred: CrowdPredictionResponse,
+    *,
+    reason: str,
+    age_hours: Optional[int] = None,
+) -> str:
+    """Friendly user-facing message for prediction-only branches."""
+    # A history row may have all-None wait minutes (e.g. SOLD across the board),
+    # so sample_size>0 doesn't guarantee usable numbers. Check both.
+    have_numbers = any(
+        v is not None
+        for v in (pred.free_wait_min, pred.rs50_wait_min, pred.rs200_wait_min)
+    )
+    if pred.sample_size == 0 or not have_numbers:
+        # No history to lean on either — be honest.
+        if reason == "stale_volunteer":
+            return (
+                f"Live volunteer report is {age_hours}h old and we don't yet have "
+                "enough historical data for this hour. Best to ask a volunteer at "
+                "the gate or check back later."
+            )
+        return (
+            "No fresh volunteer report yet today and not enough history to "
+            "estimate — please check back in a bit."
+        )
+    lead = "Based on past visits at this hour"
+    if pred.is_festival:
+        lead = "Festival day — based on past Karthigai Deepam observations"
+    elif pred.is_pournami:
+        lead = "Pournami (full-moon) day — expect heavier crowds; based on past Pournami visits"
+    if reason == "stale_volunteer":
+        return (
+            f"Live volunteer report is {age_hours}h old. {lead} "
+            f"(n={pred.sample_size}), here's an estimate:"
+        )
+    return f"No volunteer report yet today. {lead} (n={pred.sample_size}), here's an estimate:"
+
+
 def current_status(
     db: Session, *, now: Optional[datetime] = None
 ) -> CrowdCurrentResponse:
@@ -193,17 +258,18 @@ def current_status(
         )
 
     if latest is None:
+        pred = _predict_now(db, now_local)
         return CrowdCurrentResponse(
             freshness="prediction_only",
             source="prediction",
             reported_at=None,
             age_minutes=None,
-            free_wait_min=None,
-            rs50_wait_min=None,
-            rs200_wait_min=None,
+            free_wait_min=pred.free_wait_min,
+            rs50_wait_min=pred.rs50_wait_min,
+            rs200_wait_min=pred.rs200_wait_min,
             rs50_sold_out=rs50_sold,
             rs200_sold_out=rs200_sold,
-            message="No volunteer report yet today — use /crowd/predict for an estimate.",
+            message=_prediction_message(pred, reason="no_volunteer_today"),
         )
 
     reported_at = latest.reported_at
@@ -222,17 +288,20 @@ def current_status(
             "consider /crowd/predict."
         )
     else:
+        pred = _predict_now(db, now_local)
         return CrowdCurrentResponse(
             freshness="prediction_only",
             source="prediction",
             reported_at=reported_at,
             age_minutes=age_minutes,
-            free_wait_min=None,
-            rs50_wait_min=None,
-            rs200_wait_min=None,
+            free_wait_min=pred.free_wait_min,
+            rs50_wait_min=pred.rs50_wait_min,
+            rs200_wait_min=pred.rs200_wait_min,
             rs50_sold_out=rs50_sold,
             rs200_sold_out=rs200_sold,
-            message="Latest volunteer data is over 6 hours old — using prediction.",
+            message=_prediction_message(
+                pred, reason="stale_volunteer", age_hours=age_minutes // 60
+            ),
         )
 
     return CrowdCurrentResponse(

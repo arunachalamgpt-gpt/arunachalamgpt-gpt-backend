@@ -78,8 +78,12 @@ def chat_json(*, system: str, user: str) -> dict:
         raise LLMUnavailableError(str(exc)) from exc
 
 
-def chat_text(*, system: str, user: str) -> str:
-    """Run a chat completion expecting plain text back."""
+def chat_text(*, system: str, user: str, temperature: float = 0.2) -> str:
+    """Run a chat completion expecting plain text back.
+
+    `temperature` defaults to 0.2 (light variety for translation), but
+    factual callers (Q&A) should pass 0.0 to minimise hallucination.
+    """
     if not is_enabled():
         raise LLMUnavailableError("OpenAI is disabled or missing API key")
     try:
@@ -89,7 +93,7 @@ def chat_text(*, system: str, user: str) -> str:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            temperature=0.2,
+            temperature=temperature,
         )
         return (response.choices[0].message.content or "").strip()
     except Exception as exc:
