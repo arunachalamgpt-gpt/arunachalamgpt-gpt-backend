@@ -29,7 +29,7 @@ def _enable_translator(monkeypatch, prefix="[TR] "):
 
 
 def _stub_intent(monkeypatch, mapping: dict[str, intent_svc.IntentResult]):
-    def _classify(text: str) -> intent_svc.IntentResult:
+    def _classify(text: str, **_kwargs) -> intent_svc.IntentResult:
         return mapping.get(text.strip(), intent_svc.IntentResult(intent="unknown"))
 
     monkeypatch.setattr(intent_svc, "classify", _classify)

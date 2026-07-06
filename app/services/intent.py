@@ -15,7 +15,7 @@ unreachable.
 import logging
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any
+from typing import Any, Optional
 
 from app.services import llm
 
@@ -82,14 +82,44 @@ e.g. "how are you", "thanks", "good morning", "hello", "kya kar rahe ho", \
 
 - "unknown" — none of the above. slots: {}.
 
+# Follow-ups (IMPORTANT — use the conversation history)
+Prior turns are provided as chat context. When the user's current message is a
+short follow-up that only makes sense given the previous exchange, INHERIT the
+last intent and update its slots. Do not reset to "unknown" or "ask_smalltalk"
+just because the current message is short.
+
+Follow-up rules:
+- Affirmations ("yes", "yeah", "sari", "haan", "ok done") after the assistant
+  asked a yes/no question: keep the previous intent; set the matching slot to
+  true (e.g. has_elderly, has_children) if it clearly answers that question.
+- Add-on info ("with kids", "just me", "and parents") after a planning turn:
+  intent = "ask_plan"; set has_elderly / has_children accordingly.
+- Refinements ("what about tomorrow?", "and in the evening?", "how about
+  weekend?") after a crowd/plan turn: keep that intent (ask_crowd or ask_plan).
+- Follow-up questions ("tell me more", "why?", "and the goddess?", "when is
+  it?") after a general_question turn: intent = "general_question"; set
+  `question` to the FULL question the user is asking now, resolving the
+  pronoun/topic from the prior turn — e.g. previous topic "Karthigai Deepam"
+  + user "when is it?" → question = "When is Karthigai Deepam?".
+- If the previous intent was something else and the follow-up doesn't fit
+  above, fall back to normal classification.
+
 Output JSON only. No prose, no markdown."""
 
 
-def classify(text: str) -> IntentResult:
+def classify(
+    text: str, *, history: Optional[list[dict]] = None
+) -> IntentResult:
+    """Classify the user's message into one of `VALID_INTENTS`.
+
+    Optional `history` is a list of prior OpenAI-format chat messages for this
+    user; when provided, the LLM can resolve follow-ups like "yes" or "what
+    about tomorrow" that only make sense in context of a previous turn.
+    """
     if not llm.is_enabled():
         return IntentResult(intent="unknown")
     try:
-        data = llm.chat_json(system=SYSTEM_PROMPT, user=text)
+        data = llm.chat_json(system=SYSTEM_PROMPT, user=text, history=history)
     except llm.LLMUnavailableError:
         return IntentResult(intent="unknown")
 
@@ -133,5 +163,12 @@ def classify(text: str) -> IntentResult:
             # No question slot → fall back: still treat as general question with
             # the raw text so downstream can ask the QA layer.
             clean_slots["question"] = text.strip()
+    elif intent == "ask_plan":
+        # Follow-ups like "with kids" / "just parents" — capture the family
+        # composition so the planning service can factor it in.
+        if raw_slots.get("has_elderly") is not None:
+            clean_slots["has_elderly"] = bool(raw_slots.get("has_elderly"))
+        if raw_slots.get("has_children") is not None:
+            clean_slots["has_children"] = bool(raw_slots.get("has_children"))
 
     return IntentResult(intent=intent, slots=clean_slots)

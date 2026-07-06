@@ -120,3 +120,58 @@ def test_get_client_caches_after_first_call(monkeypatch):
     third = llm._get_client()
     assert third is not first
     llm.reset_client_for_tests()
+
+
+# ---------- history splice ----------
+
+
+class _CapturingClient:
+    """Records the `messages` list sent to OpenAI so tests can assert order."""
+    def __init__(self, content):
+        self._content = content
+        self.chat = type("C", (), {"completions": self})
+        self.calls: list[list[dict]] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs["messages"])
+        return _FakeResponse(self._content)
+
+
+def test_chat_json_threads_history_between_system_and_user(monkeypatch):
+    _force_enabled(monkeypatch)
+    fake = _CapturingClient(content=json.dumps({"intent": "unknown", "slots": {}}))
+    monkeypatch.setattr(llm, "_get_client", lambda: fake)
+    history = [
+        {"role": "user", "content": "old q"},
+        {"role": "assistant", "content": "old a"},
+    ]
+    llm.chat_json(system="SYS", user="now", history=history)
+    msgs = fake.calls[0]
+    assert msgs[0] == {"role": "system", "content": "SYS"}
+    assert msgs[1:3] == history
+    assert msgs[-1] == {"role": "user", "content": "now"}
+
+
+def test_chat_text_history_optional(monkeypatch):
+    """Omitting `history` should keep the old two-message shape (system+user)."""
+    _force_enabled(monkeypatch)
+    fake = _CapturingClient(content="ok")
+    monkeypatch.setattr(llm, "_get_client", lambda: fake)
+    llm.chat_text(system="S", user="U")
+    assert fake.calls[0] == [
+        {"role": "system", "content": "S"},
+        {"role": "user", "content": "U"},
+    ]
+
+
+def test_chat_text_threads_history(monkeypatch):
+    _force_enabled(monkeypatch)
+    fake = _CapturingClient(content="ok")
+    monkeypatch.setattr(llm, "_get_client", lambda: fake)
+    history = [{"role": "user", "content": "prev"}]
+    llm.chat_text(system="S", user="U", history=history)
+    assert fake.calls[0] == [
+        {"role": "system", "content": "S"},
+        {"role": "user", "content": "prev"},
+        {"role": "user", "content": "U"},
+    ]

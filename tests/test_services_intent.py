@@ -135,3 +135,54 @@ def test_classify_ask_smalltalk(monkeypatch):
     _stub_llm(monkeypatch, {"intent": "ask_smalltalk", "slots": {}})
     r = intent_svc.classify("how are you?")
     assert r.intent == "ask_smalltalk"
+
+
+def test_classify_ask_plan_carries_follow_up_slots(monkeypatch):
+    """Follow-up like "with elderly and kids" after a plan turn should carry
+    has_elderly / has_children through."""
+    _stub_llm(
+        monkeypatch,
+        {
+            "intent": "ask_plan",
+            "slots": {"has_elderly": True, "has_children": True},
+        },
+    )
+    r = intent_svc.classify("with parents and one kid")
+    assert r.intent == "ask_plan"
+    assert r.slots["has_elderly"] is True
+    assert r.slots["has_children"] is True
+
+
+def test_classify_ask_plan_without_slots_stays_empty(monkeypatch):
+    """When the LLM omits family slots, we don't invent them."""
+    _stub_llm(monkeypatch, {"intent": "ask_plan", "slots": {}})
+    r = intent_svc.classify("when should I come?")
+    assert r.intent == "ask_plan"
+    assert "has_elderly" not in r.slots
+    assert "has_children" not in r.slots
+
+
+def test_system_prompt_documents_follow_up_handling():
+    """Guard against someone editing the prompt and dropping follow-up rules."""
+    prompt = intent_svc.SYSTEM_PROMPT.lower()
+    assert "follow-up" in prompt
+    assert "inherit" in prompt
+    assert "what about tomorrow" in prompt or "and in the evening" in prompt
+
+
+def test_classify_forwards_history_to_llm(monkeypatch):
+    """Prior turns must reach the LLM so follow-ups resolve in context."""
+    captured = {}
+    monkeypatch.setattr(llm, "is_enabled", lambda: True)
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return {"intent": "ask_crowd", "slots": {}}
+
+    monkeypatch.setattr(llm, "chat_json", _capture)
+    history = [
+        {"role": "user", "content": "crowd?"},
+        {"role": "assistant", "content": "80 min"},
+    ]
+    intent_svc.classify("what about tomorrow?", history=history)
+    assert captured["history"] == history

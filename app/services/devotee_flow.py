@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 
 from app.models.devotee import DevoteeProfile
 from app.schemas.devotee import BotReply, IncomingWhatsAppMessage
+from app.services import conversation as conversation_svc
 from app.services import crowd as crowd_svc
 from app.services import intent as intent_svc
 from app.services import lunar_calendar
@@ -181,9 +182,18 @@ def _crowd_summary_line(snapshot) -> str:
 
 
 def _dispatch_intent(
-    db: Session, profile: DevoteeProfile, phone: str, result: intent_svc.IntentResult
+    db: Session,
+    profile: DevoteeProfile,
+    phone: str,
+    result: intent_svc.IntentResult,
+    *,
+    history: Optional[list[dict]] = None,
 ) -> Optional[BotReply]:
-    """Handle a recognised LLM intent; return None if we can't act on it."""
+    """Handle a recognised LLM intent; return None if we can't act on it.
+
+    `history` is threaded into the temple QA call so follow-ups understand
+    what the user was just asking about.
+    """
     if result.intent == "register_visit":
         date_str = result.slots.get("visit_date")
         if not date_str:
@@ -224,6 +234,12 @@ def _dispatch_intent(
 
     if result.intent == "ask_plan":
         target = profile.planned_visit_date or date_t.today()
+        # Follow-up slots override the stored profile flags for this turn AND
+        # persist them, so "with kids" updates the profile going forward too.
+        if "has_elderly" in result.slots:
+            profile.has_elderly = bool(result.slots["has_elderly"])
+        if "has_children" in result.slots:
+            profile.has_children = bool(result.slots["has_children"])
         rec = planning_svc.recommend(
             visit_date=target,
             has_elderly=profile.has_elderly,
@@ -258,7 +274,7 @@ def _dispatch_intent(
         question = result.slots.get("question", "").strip()
         if not question:
             return None
-        answer = qa_svc.answer(question)
+        answer = qa_svc.answer(question, history=history)
         if answer is None:
             # LLM confidently classified this as a factual question, but the
             # QA service is unavailable. Don't fall through to date parsing —
@@ -403,6 +419,9 @@ def handle_incoming(db: Session, msg: IncomingWhatsAppMessage) -> BotReply:
         profile.last_reply_at = None
         profile.repeat_count = 0
         profile.updated_at = _now()
+        # Wipe conversation memory as well — "start over" should be a clean
+        # slate, otherwise the LLM will still see old context on the next turn.
+        conversation_svc.clear_for_phone(db, msg.phone)
         db.flush()
         return BotReply(
             phone=msg.phone,
@@ -459,11 +478,51 @@ def handle_incoming(db: Session, msg: IncomingWhatsAppMessage) -> BotReply:
             state=profile.onboarding_state,  # type: ignore[arg-type]
         )
 
+    # Inner-loop guard: if the user just sent this exact message a few seconds
+    # ago (before Twilio's dedup window, or a manual re-send), reuse the last
+    # bot reply instead of re-running the LLM chain. Saves cost AND makes the
+    # repeat-detector's "same question again" prefix fire cleanly.
+    cached_reply = _maybe_reuse_recent_bot_reply(db, msg.phone, text)
+    if cached_reply is not None:
+        reply = BotReply(
+            phone=msg.phone,
+            text=cached_reply,
+            language=profile.language,  # type: ignore[arg-type]
+            state=profile.onboarding_state,  # type: ignore[arg-type]
+            metadata={"cached_from": "recent_bot_turn"},
+        )
+        conversation_svc.record_turn(
+            db, phone=msg.phone, role="user", text=text, intent="follow_up_repeat",
+        )
+        conversation_svc.record_turn(
+            db, phone=msg.phone, role="bot", text=reply.text,
+        )
+        reply.text = _maybe_break_repeat_loop(profile, reply.text)
+        db.flush()
+        reply.text = whatsapp_svc.truncate_for_whatsapp(reply.text)
+        reply.text = translator_svc.translate(reply.text, profile.language)
+        return reply
+
+    # Load recent conversation history so the LLM has context for follow-ups
+    # like "yes" / "what about tomorrow?" / "and for kids?". Cheap DB read.
+    history = conversation_svc.load_recent(db, phone=msg.phone)
+
     # LLM intent first; keyword fallback if it doesn't fire or returns unknown.
-    intent_result = intent_svc.classify(text)
-    reply = _dispatch_intent(db, profile, msg.phone, intent_result)
+    intent_result = intent_svc.classify(text, history=history)
+    reply = _dispatch_intent(
+        db, profile, msg.phone, intent_result, history=history
+    )
     if reply is None:
         reply = _dispatch_keywords(db, profile, msg.phone, text)
+
+    # Persist the turn pair BEFORE loop-wrap so the stored bot text stays
+    # canonical (no "Got the same question…" chrome polluting the transcript).
+    conversation_svc.record_turn(
+        db, phone=msg.phone, role="user", text=text, intent=intent_result.intent,
+    )
+    conversation_svc.record_turn(
+        db, phone=msg.phone, role="bot", text=reply.text,
+    )
 
     # Loop-break: if this English reply matches the previous one we sent
     # within a few minutes, the user is repeating themselves and we'd
@@ -475,6 +534,41 @@ def handle_incoming(db: Session, msg: IncomingWhatsAppMessage) -> BotReply:
     reply.text = whatsapp_svc.truncate_for_whatsapp(reply.text)
     reply.text = translator_svc.translate(reply.text, profile.language)
     return reply
+
+
+# ---------- inner-loop dedup (input side) ----------
+
+# If the user re-sends the same message within this window, we skip the LLM
+# chain and reuse the last bot reply. Twilio's own dedup covers same MessageSid
+# retries; this covers manual re-sends and network hiccups where the user
+# taps "send" again because they didn't see the reply arrive.
+_INPUT_DEDUP_WINDOW = timedelta(seconds=30)
+
+
+def _maybe_reuse_recent_bot_reply(
+    db: Session, phone: str, current_text: str
+) -> Optional[str]:
+    """Return the last bot reply text if the user is repeating themselves.
+
+    Compares the current message (case-insensitive, whitespace-stripped) to
+    the user's most recent turn. If it's the same and we have a bot reply
+    that came after it within the window, return that reply text; otherwise
+    None (proceed with normal LLM flow).
+    """
+    last_user = conversation_svc.last_turn(db, phone=phone, role="user")
+    if last_user is None:
+        return None
+    if last_user.text.strip().lower() != current_text.strip().lower():
+        return None
+    last_bot = conversation_svc.last_turn(db, phone=phone, role="bot")
+    if last_bot is None or last_bot.created_at < last_user.created_at:
+        return None
+    # Timestamps are naive UTC in SQLite; production Postgres columns are also
+    # `timestamp without time zone`. Treat them as UTC for the window check.
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    if now_utc - last_user.created_at > _INPUT_DEDUP_WINDOW:
+        return None
+    return last_bot.text
 
 
 # ---------- repeat-loop detection ----------

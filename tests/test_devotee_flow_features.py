@@ -25,7 +25,7 @@ def _passthrough_translate(monkeypatch):
 
 
 def _stub_intent(monkeypatch, mapping):
-    def _classify(text):
+    def _classify(text, **_kwargs):
         return mapping.get(text.strip(), intent_svc.IntentResult(intent="unknown"))
 
     monkeypatch.setattr(intent_svc, "classify", _classify)
@@ -111,7 +111,7 @@ def test_no_name_omits_greeting(db_session, monkeypatch):
 def test_general_question_calls_qa(db_session, monkeypatch):
     _passthrough_translate(monkeypatch)
     monkeypatch.setattr(
-        qa_svc, "answer", lambda q: f"FAKE QA: {q}"
+        qa_svc, "answer", lambda q, **_: f"FAKE QA: {q}"
     )
     _stub_intent(
         monkeypatch,
@@ -157,7 +157,7 @@ def test_general_question_qa_unavailable_returns_polite_fallback(db_session, mon
     polite "try again" message instead of silently dropping the message or
     mis-parsing it as a visit date."""
     _passthrough_translate(monkeypatch)
-    monkeypatch.setattr(qa_svc, "answer", lambda q: None)
+    monkeypatch.setattr(qa_svc, "answer", lambda q, **_: None)
     _stub_intent(
         monkeypatch,
         {
@@ -425,6 +425,273 @@ def test_menu_is_translated_for_non_english(db_session, monkeypatch):
     )
     assert r.text.startswith("[TAMIL]")
     assert captured["lang"] == "tamil"
+
+
+# ---------- inner-loop input dedup ----------
+
+
+def test_inner_loop_reuses_previous_bot_reply_within_window(
+    db_session, monkeypatch
+):
+    """User re-sends the exact same message a moment later → reuse last reply,
+    skip the LLM chain entirely."""
+    from app.services import conversation as conv_svc
+
+    _passthrough_translate(monkeypatch)
+
+    profile = DevoteeProfile(
+        phone="9040404040",
+        language="english",
+        onboarding_state="language_selected",
+    )
+    db_session.add(profile)
+    # Seed a recent user+bot exchange.
+    conv_svc.record_turn(
+        db_session, phone="9040404040", role="user", text="crowd?"
+    )
+    conv_svc.record_turn(
+        db_session, phone="9040404040", role="bot",
+        text="Live report: Free 80 min",
+    )
+    db_session.commit()
+
+    calls = {"intent": 0}
+
+    def _classify(text, **_):
+        calls["intent"] += 1
+        return intent_svc.IntentResult(intent="ask_crowd")
+
+    monkeypatch.setattr(intent_svc, "classify", _classify)
+
+    r = devotee_flow.handle_incoming(
+        db_session, _msg("crowd?", phone="9040404040")
+    )
+    # Cached reply reused, no LLM call.
+    assert calls["intent"] == 0
+    assert "Free 80 min" in r.text
+    assert r.metadata.get("cached_from") == "recent_bot_turn"
+
+
+def test_inner_loop_ignored_when_input_differs(db_session, monkeypatch):
+    from app.services import conversation as conv_svc
+    _passthrough_translate(monkeypatch)
+
+    profile = DevoteeProfile(
+        phone="9050505050",
+        language="english",
+        onboarding_state="language_selected",
+    )
+    db_session.add(profile)
+    conv_svc.record_turn(db_session, phone="9050505050", role="user", text="crowd?")
+    conv_svc.record_turn(db_session, phone="9050505050", role="bot", text="80 min")
+    db_session.commit()
+
+    calls = {"intent": 0}
+
+    def _classify(text, **_):
+        calls["intent"] += 1
+        return intent_svc.IntentResult(intent="ask_crowd")
+
+    monkeypatch.setattr(intent_svc, "classify", _classify)
+    devotee_flow.handle_incoming(
+        db_session, _msg("plan?", phone="9050505050")
+    )
+    assert calls["intent"] == 1  # LLM ran normally
+
+
+def test_inner_loop_ignored_when_window_expired(db_session, monkeypatch):
+    from app.services import conversation as conv_svc
+    from datetime import timedelta
+    _passthrough_translate(monkeypatch)
+
+    profile = DevoteeProfile(
+        phone="9060606060",
+        language="english",
+        onboarding_state="language_selected",
+    )
+    db_session.add(profile)
+    conv_svc.record_turn(db_session, phone="9060606060", role="user", text="crowd?")
+    conv_svc.record_turn(db_session, phone="9060606060", role="bot", text="80 min")
+    db_session.commit()
+
+    # Push both turns beyond the dedup window.
+    for t in db_session.query(devotee_flow.conversation_svc.ConversationTurn if False else __import__("app.models.conversation_turn", fromlist=["ConversationTurn"]).ConversationTurn).filter_by(phone="9060606060"):
+        t.created_at = datetime.utcnow() - timedelta(minutes=5)
+    db_session.commit()
+
+    calls = {"intent": 0}
+
+    def _classify(text, **_):
+        calls["intent"] += 1
+        return intent_svc.IntentResult(intent="ask_crowd")
+
+    monkeypatch.setattr(intent_svc, "classify", _classify)
+    devotee_flow.handle_incoming(
+        db_session, _msg("crowd?", phone="9060606060")
+    )
+    assert calls["intent"] == 1  # window expired → LLM ran
+
+
+def test_inner_loop_no_last_bot_returns_none(db_session):
+    """User has sent a message but bot never replied — no cache to reuse."""
+    from app.services import conversation as conv_svc
+    conv_svc.record_turn(
+        db_session, phone="9070707070", role="user", text="hi"
+    )
+    db_session.commit()
+    assert devotee_flow._maybe_reuse_recent_bot_reply(
+        db_session, "9070707070", "hi"
+    ) is None
+
+
+def test_inner_loop_no_history_returns_none(db_session):
+    """Fresh phone with no turns — nothing to dedup against."""
+    assert devotee_flow._maybe_reuse_recent_bot_reply(
+        db_session, "9080808080", "anything"
+    ) is None
+
+
+def test_inner_loop_bot_before_user_returns_none(db_session):
+    """Defensive: if somehow the last bot turn predates the last user turn,
+    don't reuse it (stale reply for a newer question)."""
+    from app.services import conversation as conv_svc
+    from datetime import timedelta
+    conv_svc.record_turn(
+        db_session, phone="9090909090", role="bot", text="old reply"
+    )
+    conv_svc.record_turn(
+        db_session, phone="9090909090", role="user", text="new question"
+    )
+    # Make the bot turn OLDER than the user turn.
+    bot_row = conv_svc.last_turn(db_session, phone="9090909090", role="bot")
+    bot_row.created_at = datetime.utcnow() - timedelta(minutes=10)
+    db_session.flush()
+    db_session.commit()
+    assert devotee_flow._maybe_reuse_recent_bot_reply(
+        db_session, "9090909090", "new question"
+    ) is None
+
+
+# ---------- ask_plan follow-up slots ----------
+
+
+def test_ask_plan_follow_up_updates_profile_flags(db_session, monkeypatch):
+    _passthrough_translate(monkeypatch)
+    profile = DevoteeProfile(
+        phone="9012340000",
+        language="english",
+        onboarding_state="language_selected",
+        has_elderly=False,
+        has_children=False,
+    )
+    db_session.add(profile)
+    db_session.commit()
+
+    _stub_intent(
+        monkeypatch,
+        {
+            "with elderly": intent_svc.IntentResult(
+                intent="ask_plan",
+                slots={"has_elderly": True, "has_children": False},
+            ),
+        },
+    )
+    r = devotee_flow.handle_incoming(
+        db_session, _msg("with elderly", phone="9012340000")
+    )
+    db_session.commit()
+    fresh = db_session.get(DevoteeProfile, "9012340000")
+    assert fresh.has_elderly is True
+    assert "Rs.200" in r.text  # early-arrival recommendation kicked in
+
+
+# ---------- conversation memory ----------
+
+
+def test_handle_incoming_records_user_and_bot_turns(db_session, monkeypatch):
+    from app.services import conversation as conv_svc
+    _passthrough_translate(monkeypatch)
+    _stub_intent(
+        monkeypatch,
+        {
+            "Hi": intent_svc.IntentResult(intent="unknown"),
+            "5": intent_svc.IntentResult(intent="unknown"),
+            "crowd?": intent_svc.IntentResult(intent="unknown"),
+        },
+    )
+    devotee_flow.handle_incoming(db_session, _msg("Hi", phone="9010101010"))
+    devotee_flow.handle_incoming(db_session, _msg("5", phone="9010101010"))
+    devotee_flow.handle_incoming(db_session, _msg("crowd?", phone="9010101010"))
+    db_session.commit()
+
+    turns = conv_svc.load_recent(db_session, phone="9010101010", limit=20)
+    # We only start recording once the LLM path runs (after language pick).
+    assert any(t["content"] == "crowd?" for t in turns)
+    # Bot reply also stored (as assistant).
+    assistants = [t for t in turns if t["role"] == "assistant"]
+    assert len(assistants) >= 1
+
+
+def test_handle_incoming_passes_history_to_intent(db_session, monkeypatch):
+    """The classifier must receive prior turns for context-aware follow-ups."""
+    from app.services import conversation as conv_svc
+    _passthrough_translate(monkeypatch)
+    seen_histories = []
+
+    def _classify(text, **kwargs):
+        seen_histories.append(kwargs.get("history"))
+        return intent_svc.IntentResult(intent="unknown")
+
+    monkeypatch.setattr(intent_svc, "classify", _classify)
+
+    # Seed a prior turn in the DB.
+    profile = DevoteeProfile(
+        phone="9020202020",
+        language="english",
+        onboarding_state="language_selected",
+    )
+    db_session.add(profile)
+    conv_svc.record_turn(
+        db_session, phone="9020202020", role="user", text="crowd?"
+    )
+    conv_svc.record_turn(
+        db_session, phone="9020202020", role="bot", text="80 min"
+    )
+    db_session.commit()
+
+    devotee_flow.handle_incoming(
+        db_session, _msg("what about tomorrow?", phone="9020202020")
+    )
+    # First call from handle_incoming — the language-selection stub uses
+    # `LANGUAGE_BY_INDEX` fast-path for the "5" input; here we start already
+    # past selection so intent.classify fires once with history.
+    assert seen_histories, "intent.classify was never called"
+    hist = seen_histories[0]
+    assert hist is not None
+    assert {"role": "user", "content": "crowd?"} in hist
+
+
+def test_reset_clears_conversation_memory(db_session, monkeypatch):
+    from app.services import conversation as conv_svc
+    _passthrough_translate(monkeypatch)
+
+    profile = DevoteeProfile(
+        phone="9030303030",
+        language="english",
+        onboarding_state="language_selected",
+    )
+    db_session.add(profile)
+    conv_svc.record_turn(
+        db_session, phone="9030303030", role="user", text="old stuff"
+    )
+    db_session.commit()
+    assert conv_svc.load_recent(db_session, phone="9030303030")
+
+    devotee_flow.handle_incoming(
+        db_session, _msg("/reset", phone="9030303030")
+    )
+    db_session.commit()
+    assert conv_svc.load_recent(db_session, phone="9030303030") == []
 
 
 def test_menu_skips_translation_when_no_language(db_session, monkeypatch):

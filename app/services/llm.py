@@ -54,17 +54,30 @@ def reset_client_for_tests() -> None:
     _client = None
 
 
-def chat_json(*, system: str, user: str) -> dict:
+def _build_messages(
+    system: str, user: str, history: Optional[list[dict]]
+) -> list[dict]:
+    """Splice optional prior turns between the system prompt and the current
+    user message. `history` is expected to be OpenAI-shaped chat messages —
+    the conversation service produces them directly.
+    """
+    messages: list[dict] = [{"role": "system", "content": system}]
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": user})
+    return messages
+
+
+def chat_json(
+    *, system: str, user: str, history: Optional[list[dict]] = None
+) -> dict:
     """Run a chat completion expecting a JSON object back. Returns parsed dict."""
     if not is_enabled():
         raise LLMUnavailableError("OpenAI is disabled or missing API key")
     try:
         response = _get_client().chat.completions.create(
             model=OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            messages=_build_messages(system, user, history),
             response_format={"type": "json_object"},
             temperature=0.0,
         )
@@ -78,21 +91,25 @@ def chat_json(*, system: str, user: str) -> dict:
         raise LLMUnavailableError(str(exc)) from exc
 
 
-def chat_text(*, system: str, user: str, temperature: float = 0.2) -> str:
+def chat_text(
+    *,
+    system: str,
+    user: str,
+    temperature: float = 0.2,
+    history: Optional[list[dict]] = None,
+) -> str:
     """Run a chat completion expecting plain text back.
 
     `temperature` defaults to 0.2 (light variety for translation), but
     factual callers (Q&A) should pass 0.0 to minimise hallucination.
+    `history` lets callers thread in prior turns for context-aware replies.
     """
     if not is_enabled():
         raise LLMUnavailableError("OpenAI is disabled or missing API key")
     try:
         response = _get_client().chat.completions.create(
             model=OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            messages=_build_messages(system, user, history),
             temperature=temperature,
         )
         return (response.choices[0].message.content or "").strip()

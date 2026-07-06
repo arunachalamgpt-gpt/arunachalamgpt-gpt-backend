@@ -12,7 +12,8 @@ Faithfulness rules (so the bot doesn't invent dates, miracles, or relics):
 import logging
 from typing import Optional
 
-from app.services import llm
+from app.services import llm, retriever
+from app.services import qa_eval as qa_eval_svc
 
 logger = logging.getLogger(__name__)
 
@@ -63,17 +64,137 @@ the user to the temple office or a panchang instead.
 """
 
 
-def answer(question: str) -> Optional[str]:
+_MIN_ANSWER_CHARS = 20  # anything shorter can't substantively answer.
+
+
+def _looks_like_valid_answer(text: str, *, question: str) -> bool:
+    """Reject partial/degenerate LLM outputs that would confuse the user.
+
+    Accepts the fixed off-topic redirect and the honest "don't have a confident
+    answer" line — both are intentional short replies. Rejects: empty, too
+    short, the model asking a clarifying question back, or the model simply
+    echoing the user's question.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return False
+    # The intentional short replies from the prompt are always valid.
+    if stripped == REDIRECT_REPLY:
+        return True
+    if "don't have a confident answer" in stripped.lower():
+        return True
+    if len(stripped) < _MIN_ANSWER_CHARS:
+        return False
+    # Model asking a clarifying question back instead of answering.
+    # A single trailing "?" on a long, informative answer is fine
+    # ("Would you like directions?"); rejection targets short question-heavy
+    # replies.
+    q_marks = stripped.count("?")
+    if q_marks >= 2 and len(stripped) < 200:
+        return False
+    if stripped.endswith("?") and len(stripped) < 80:
+        return False
+    # Model just echoed the user's question back (near-verbatim).
+    if question and stripped.lower().rstrip("?.! ") == question.lower().rstrip("?.! "):
+        return False
+    return True
+
+
+RETRIEVAL_TOP_K = 4
+
+
+def _build_user_message(question: str, retrieved) -> str:
+    """Prepend retrieved KB facts to the user's question when we found any.
+
+    The LLM sees the facts as vetted "extra context", then the raw question.
+    Retrieval failure is safe — the SYSTEM_PROMPT still enumerates the
+    baseline grounded facts, and the faithfulness rules kick in.
+    """
+    ctx = retriever.format_for_prompt(retrieved)
+    if not ctx:
+        return question
+    return (
+        "Extra grounded context for this question (already vetted — prefer "
+        "these facts over parametric knowledge if they overlap):\n"
+        f"{ctx}\n\n"
+        f"Question: {question}"
+    )
+
+
+def answer(
+    question: str, *, history: Optional[list[dict]] = None
+) -> Optional[str]:
     """Return a temple-flavoured answer to the user's question.
 
-    Returns `None` when the LLM is unavailable so the caller can fall back to
-    generic help text. Never raises.
+    Retrieval: top-K KB facts are pulled by `retriever.retrieve_top_k` and
+    injected into the user message so the LLM has explicit grounding for the
+    current question. Retrieved IDs are logged for observability — pair with
+    `qa_eval.run_eval` to measure context recall offline.
+
+    Optional `history` threads prior turns into the LLM context so follow-ups
+    like "tell me more about that" or "when is it?" resolve to the topic just
+    discussed. Returns `None` when the LLM is unavailable OR when the response
+    fails partial-answer validation, so the caller can fall back to a helpful
+    generic reply. Never raises.
     """
     if not llm.is_enabled():
         return None
+    retrieved = retriever.retrieve_top_k(question, k=RETRIEVAL_TOP_K)
+    if retrieved:
+        logger.info(
+            "Temple QA retrieved %d chunks for %r: %s",
+            len(retrieved), question[:80],
+            [entry["id"] for entry in retrieved],
+        )
     try:
-        text = llm.chat_text(system=SYSTEM_PROMPT, user=question, temperature=0.0)
+        text = llm.chat_text(
+            system=SYSTEM_PROMPT,
+            user=_build_user_message(question, retrieved),
+            temperature=0.0,
+            history=history,
+        )
     except llm.LLMUnavailableError as exc:
         logger.info("Temple Q&A skipped — LLM unavailable: %s", exc)
         return None
-    return text or None
+    if not text:
+        return None
+    if not _looks_like_valid_answer(text, question=question):
+        logger.info(
+            "Temple QA rejected partial answer for %r: %r",
+            question[:80], text[:120],
+        )
+        return None
+    # Observability: log utilization + relevancy + faithfulness so we can
+    # spot when the model ignored what we retrieved, wandered off-topic, or
+    # invented facts. Two intentional short replies are exempted from the
+    # metrics — they'd otherwise show faithfulness=0 / relevancy=0 by design
+    # and drown out real signal.
+    if text.strip() == REDIRECT_REPLY:
+        logger.info("Temple QA redirected off-topic query %r", question[:80])
+        return text
+    if "don't have a confident answer" in text.lower():
+        logger.info(
+            "Temple QA emitted honest 'no confident answer' for %r",
+            question[:80],
+        )
+        return text
+    relevancy = qa_eval_svc.compute_answer_relevancy(
+        question, text, retrieved or None
+    )
+    faithfulness = qa_eval_svc.compute_faithfulness(
+        text, retrieved or None, question=question,
+    )
+    if retrieved:
+        util = qa_eval_svc.compute_context_utilization(text, retrieved)
+        logger.info(
+            "Temple QA utilization=%.2f relevancy=%.2f faithfulness=%.2f "
+            "for %r (retrieved=%s)",
+            util, relevancy, faithfulness, question[:80],
+            [entry["id"] for entry in retrieved],
+        )
+    else:
+        logger.info(
+            "Temple QA relevancy=%.2f faithfulness=%.2f for %r (no retrieval)",
+            relevancy, faithfulness, question[:80],
+        )
+    return text

@@ -5,6 +5,7 @@ Importing this package registers all `table=True` classes with
 build the schema.
 """
 
+from app.models.conversation_turn import ConversationTurn
 from app.models.crowd import CrowdHistory, CrowdStatus
 from app.models.devotee import DevoteeProfile
 from app.models.lodge import Lodge, LodgeAvailability, LodgeBooking
@@ -12,6 +13,7 @@ from app.models.processed_message import ProcessedMessage
 from app.models.temple_config import TempleConfig
 
 __all__ = [
+    "ConversationTurn",
     "CrowdHistory",
     "CrowdStatus",
     "DevoteeProfile",
