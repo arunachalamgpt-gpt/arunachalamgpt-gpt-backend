@@ -401,6 +401,58 @@ def _dispatch_keywords(
     )
 
 
+# ---------- lingam guide (sync helper) ----------
+
+
+def _handle_lingam_sync(lingam_key: str, text: str, language: str):
+    """Fetch lingam data from Supabase and get Claude reply synchronously.
+
+    Returns (reply_text, audio_url) or (None, None) on failure.
+    """
+    import os
+    import anthropic
+    from src.features.lingam_guide import (
+        LINGAM_NUMBER_MAP, format_lingam_data, get_audio_url, LINGAM_SYSTEM_PROMPT,
+    )
+    from src.database import get_db
+
+    lingam_num = LINGAM_NUMBER_MAP.get(lingam_key)
+    if not lingam_num:
+        return None, None
+
+    try:
+        db = get_db()
+        result = (
+            db.table("lingam_guide")
+            .select("*")
+            .eq("lingam_number", lingam_num)
+            .execute()
+        )
+        if not result.data:
+            return None, None
+        data = result.data[0]
+    except Exception as exc:
+        logger.warning("Lingam Supabase fetch failed: %s", exc)
+        return None, None
+
+    try:
+        system = LINGAM_SYSTEM_PROMPT.format(lingam_data=format_lingam_data(data))
+        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        response = client.messages.create(
+            model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6"),
+            max_tokens=350,
+            system=system,
+            messages=[{"role": "user", "content": text}],
+        )
+        reply_text = response.content[0].text
+    except Exception as exc:
+        logger.warning("Lingam Claude call failed: %s", exc)
+        return None, None
+
+    audio_url = get_audio_url(data, language)
+    return reply_text, audio_url
+
+
 # ---------- entry point ----------
 
 
@@ -477,6 +529,25 @@ def handle_incoming(db: Session, msg: IncomingWhatsAppMessage) -> BotReply:
             language=picked,  # type: ignore[arg-type]
             state=profile.onboarding_state,  # type: ignore[arg-type]
         )
+
+    # Lingam guide — detect before LLM (keyword + fuzzy, no AI cost)
+    from src.features.lingam_guide import (
+        detect_lingam, LINGAM_NUMBER_MAP, format_lingam_data,
+        get_audio_url, LINGAM_SYSTEM_PROMPT,
+    )
+    lingam_key = detect_lingam(text)
+    if lingam_key:
+        lingam_reply, audio_url = _handle_lingam_sync(
+            lingam_key, text, profile.language or "english"
+        )
+        if lingam_reply:
+            return BotReply(
+                phone=msg.phone,
+                text=lingam_reply,
+                language=profile.language,  # type: ignore[arg-type]
+                state=profile.onboarding_state,  # type: ignore[arg-type]
+                metadata={"audio_url": audio_url} if audio_url else {},
+            )
 
     # Inner-loop guard: if the user just sent this exact message a few seconds
     # ago (before Twilio's dedup window, or a manual re-send), reuse the last

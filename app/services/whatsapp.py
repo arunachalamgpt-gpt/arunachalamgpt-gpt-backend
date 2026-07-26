@@ -246,3 +246,46 @@ def send_text(phone: str, text: str) -> SendResult:
     except Exception as exc:  # network / timeout / dns
         logger.warning("Twilio send failed for to=%s: %s", redacted, exc)
         return SendResult(sent=False, error=str(exc))
+
+
+def send_audio(phone: str, audio_url: str) -> SendResult:
+    """Send an outbound WhatsApp audio message via the Twilio REST API."""
+    if not is_enabled():
+        return SendResult(sent=False, error="twilio_disabled")
+    if not TWILIO_FROM_NUMBER:
+        return SendResult(sent=False, error="missing_from_number")
+    if not audio_url:
+        return SendResult(sent=False, error="empty_audio_url")
+
+    url = (
+        f"https://api.twilio.com/2010-04-01/Accounts/"
+        f"{TWILIO_ACCOUNT_SID}/Messages.json"
+    )
+    data = {
+        "From": f"whatsapp:{TWILIO_FROM_NUMBER}",
+        "To": f"whatsapp:+{phone.lstrip('+')}",
+        "MediaUrl0": audio_url,
+    }
+    redacted = redact_phone(phone)
+    try:
+        response = httpx.post(
+            url,
+            data=data,
+            auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+            timeout=TWILIO_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        provider_id = response.json().get("sid")
+        logger.info("Twilio audio sent to=%s sid=%s", redacted, provider_id)
+        return SendResult(sent=True, provider_message_id=provider_id)
+    except httpx.HTTPStatusError as exc:
+        logger.warning(
+            "Twilio audio HTTP %s for to=%s: %s",
+            exc.response.status_code,
+            redacted,
+            exc.response.text,
+        )
+        return SendResult(sent=False, error=f"http_{exc.response.status_code}")
+    except Exception as exc:
+        logger.warning("Twilio audio send failed for to=%s: %s", redacted, exc)
+        return SendResult(sent=False, error=str(exc))
