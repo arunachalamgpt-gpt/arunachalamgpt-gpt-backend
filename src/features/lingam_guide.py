@@ -1,8 +1,5 @@
 import logging
 from rapidfuzz import fuzz
-from src.database import get_db
-from src.claude_ai import get_reply, LANGUAGE_RULE
-from src.whatsapp import send_text, send_buttons, send_audio
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +140,13 @@ on the Girivalam route around Arunachala hill, Tiruvannamalai.
 LINGAM DATA:
 {lingam_data}
 
-""" + LANGUAGE_RULE + """
+CRITICAL LANGUAGE RULE:
+Detect the language of the user message and reply in EXACTLY that language.
+Tamil script or romanized Tamil -> reply in Tamil
+Telugu -> reply in Telugu
+Kannada -> reply in Kannada
+Hindi -> reply in Hindi
+English -> reply in English
 
 Provide:
 1. Location (km from start, direction)
@@ -202,6 +205,7 @@ def detect_lingam(text: str) -> str | None:
 # ─────────────────────────────────────────────
 
 async def get_lingam_data(lingam_key: str) -> dict | None:
+    from src.database import get_db
     lingam_num = LINGAM_NUMBER_MAP.get(lingam_key)
     if not lingam_num:
         return None
@@ -241,25 +245,17 @@ def get_audio_url(lingam_data: dict, language: str) -> str | None:
 # ─────────────────────────────────────────────
 
 async def send_lingam_info(phone: str, lingam_key: str, text: str, language: str) -> None:
+    from src.claude_ai import get_reply
+    from src.whatsapp import send_text, send_audio
     lingam_data = await get_lingam_data(lingam_key)
     if not lingam_data:
         await send_text(phone, "Lingam data not found. Please try again. 🙏")
         return
 
-    # Step 1: Call Claude with lingam data → get spiritual text reply
-    system = LINGAM_SYSTEM_PROMPT.format(
-        lingam_data=format_lingam_data(lingam_data)
-    )
-    reply = await get_reply(
-        system_prompt=system,
-        user_message=text,
-        max_tokens=350
-    )
-
-    # Step 2: Send text reply
+    system = LINGAM_SYSTEM_PROMPT.format(lingam_data=format_lingam_data(lingam_data))
+    reply = await get_reply(system_prompt=system, user_message=text, max_tokens=350)
     await send_text(phone, reply)
 
-    # Step 3: Send audio immediately in user's language
     audio_url = get_audio_url(lingam_data, language)
     if audio_url:
         await send_audio(phone, audio_url)
@@ -274,16 +270,15 @@ async def send_lingam_info(phone: str, lingam_key: str, text: str, language: str
 # ─────────────────────────────────────────────
 
 async def handle(phone: str, text: str, language: str) -> None:
+    from src.whatsapp import send_text
     text_clean = text.strip()
 
-    # Detect which lingam (exact + fuzzy)
     lingam_key = detect_lingam(text_clean)
 
     if lingam_key:
         await send_lingam_info(phone, lingam_key, text_clean, language)
         return
 
-    # No lingam detected — show help
     await send_text(
         phone,
         "Please ask about a specific lingam. Example:\n"
