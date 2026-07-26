@@ -405,46 +405,54 @@ def _dispatch_keywords(
 
 
 def _handle_lingam_sync(lingam_key: str, text: str, language: str):
-    """Fetch lingam data from Supabase and get Claude reply synchronously.
+    """Fetch lingam data from Supabase REST API and get Claude reply synchronously.
 
     Returns (reply_text, audio_url) or (None, None) on failure.
+    Uses httpx (already in requirements) to avoid supabase package version conflict.
     """
     import os
     import anthropic
+    import httpx
     from src.features.lingam_guide import (
         LINGAM_NUMBER_MAP, format_lingam_data, get_audio_url, LINGAM_SYSTEM_PROMPT,
     )
-    from src.database import get_db
 
     lingam_num = LINGAM_NUMBER_MAP.get(lingam_key)
     if not lingam_num:
         return None, None
 
+    # Fetch from Supabase REST API directly using httpx
     try:
-        db = get_db()
-        result = (
-            db.table("lingam_guide")
-            .select("*")
-            .eq("lingam_number", lingam_num)
-            .execute()
+        supabase_url = os.environ.get("SUPABASE_URL", "")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+        response = httpx.get(
+            f"{supabase_url}/rest/v1/lingam_guide",
+            headers={
+                "apikey": supabase_key,
+                "Authorization": f"Bearer {supabase_key}",
+            },
+            params={"lingam_number": f"eq.{lingam_num}", "select": "*"},
+            timeout=10,
         )
-        if not result.data:
+        rows = response.json()
+        if not rows:
             return None, None
-        data = result.data[0]
+        data = rows[0]
     except Exception as exc:
         logger.warning("Lingam Supabase fetch failed: %s", exc)
         return None, None
 
+    # Call Claude synchronously
     try:
         system = LINGAM_SYSTEM_PROMPT.format(lingam_data=format_lingam_data(data))
         client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-        response = client.messages.create(
+        api_response = client.messages.create(
             model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6"),
             max_tokens=350,
             system=system,
             messages=[{"role": "user", "content": text}],
         )
-        reply_text = response.content[0].text
+        reply_text = api_response.content[0].text
     except Exception as exc:
         logger.warning("Lingam Claude call failed: %s", exc)
         return None, None
