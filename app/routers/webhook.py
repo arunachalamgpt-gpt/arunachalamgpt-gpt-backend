@@ -134,6 +134,12 @@ async def twilio_inbound(request: Request, db: Session = Depends(get_db)):
     db.commit()
 
     result = whatsapp.send_text(parsed.phone, reply.text)
+
+    # Send audio voice note immediately if lingam feature returned one
+    audio_url = (reply.metadata or {}).get("audio_url")
+    if audio_url:
+        whatsapp.send_audio(parsed.phone, audio_url)
+
     return {
         "accepted": True,
         "to": whatsapp.redact_phone(parsed.phone),

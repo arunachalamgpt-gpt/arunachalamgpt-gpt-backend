@@ -10,3 +10,6 @@ openai==2.41.0
 httpx==0.28.1
 python-multipart==0.0.27
 dateparser==1.4.1
+rapidfuzz==3.14.5
+supabase==2.3.0
+anthropic==0.20.0
