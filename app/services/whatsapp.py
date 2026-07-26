@@ -264,6 +264,7 @@ def send_audio(phone: str, audio_url: str) -> SendResult:
     data = {
         "From": f"whatsapp:{TWILIO_FROM_NUMBER}",
         "To": f"whatsapp:+{phone.lstrip('+')}",
+        "Body": "🔊",
         "MediaUrl0": audio_url,
     }
     redacted = redact_phone(phone)
